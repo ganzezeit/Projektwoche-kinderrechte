@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ref, onValue, push, set, remove } from 'firebase/database';
 import { db } from '../firebase';
 
@@ -6,6 +6,20 @@ const PASTEL_COLORS = ['#FFE0B2', '#FFF9C4', '#C8E6C9', '#F8BBD0', '#D1C4E9', '#
 
 function pickColor() {
   return PASTEL_COLORS[Math.floor(Math.random() * PASTEL_COLORS.length)];
+}
+
+// --- Lightbox for fullscreen image viewing ---
+function Lightbox({ src, onClose }) {
+  return (
+    <div style={s.lightboxOverlay} onClick={onClose}>
+      <img
+        src={src}
+        alt="Foto"
+        style={s.lightboxImg}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
 }
 
 function LikeButton({ postKey, likes, author, code }) {
@@ -50,6 +64,17 @@ export default function BoardPage({ code }) {
   const [addingCol, setAddingCol] = useState(null);
   const [noteText, setNoteText] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Photo state
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState(null);
+  const fileInputRef = useRef(null);
+
+  // Lightbox state
+  const [lightboxSrc, setLightboxSrc] = useState(null);
 
   // Override global overflow:hidden on html/body/#root so the board page scrolls on mobile
   useEffect(() => {
@@ -96,20 +121,89 @@ export default function BoardPage({ code }) {
     setNameSet(true);
   };
 
-  const handleSubmit = useCallback((colIndex) => {
+  // Clean up preview URL when file changes
+  useEffect(() => {
+    if (selectedFile) {
+      const url = URL.createObjectURL(selectedFile);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [selectedFile]);
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      setSelectedFile(file);
+      setUploadError(null);
+    }
+    // Reset input so same file can be re-selected
+    e.target.value = '';
+  };
+
+  const clearPhoto = () => {
+    setSelectedFile(null);
+    setPreviewUrl(null);
+    setUploadError(null);
+  };
+
+  const handleSubmit = useCallback(async (colIndex) => {
     const text = noteText.trim();
-    if (!text || !author) return;
-    const postsRef = ref(db, 'boards/' + code + '/posts');
-    push(postsRef, {
-      author,
-      column: colIndex,
-      text,
-      color: pickColor(),
-      timestamp: Date.now(),
-    });
-    setNoteText('');
-    setAddingCol(null);
-  }, [code, noteText, author]);
+    if (!text && !selectedFile) return;
+    if (!author) return;
+
+    // Text-only post (no photo)
+    if (!selectedFile) {
+      const postsRef = ref(db, 'boards/' + code + '/posts');
+      push(postsRef, {
+        author,
+        column: colIndex,
+        text,
+        color: pickColor(),
+        timestamp: Date.now(),
+      });
+      setNoteText('');
+      setAddingCol(null);
+      return;
+    }
+
+    // Photo post — compress then upload
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
+
+    try {
+      const { compressImage, uploadImage } = await import('../utils/imageUpload');
+
+      const compressed = await compressImage(selectedFile);
+      const postId = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      const { downloadURL } = await uploadImage(code, postId, compressed, (pct) => {
+        setUploadProgress(pct);
+      });
+
+      // Save post with imageUrl
+      const postsRef = ref(db, 'boards/' + code + '/posts');
+      await push(postsRef, {
+        author,
+        column: colIndex,
+        text: text || '',
+        imageUrl: downloadURL,
+        color: pickColor(),
+        timestamp: Date.now(),
+      });
+
+      setNoteText('');
+      setSelectedFile(null);
+      setAddingCol(null);
+    } catch (err) {
+      console.error('[BoardPage] Upload error:', err);
+      setUploadError('Upload fehlgeschlagen. Nochmal versuchen?');
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+    }
+  }, [code, noteText, author, selectedFile]);
 
   if (loading) {
     return (
@@ -123,9 +217,9 @@ export default function BoardPage({ code }) {
     return (
       <div style={s.page}>
         <div style={s.messageCard}>
-          <div style={{ fontSize: 48 }}>🔍</div>
+          <div style={{ fontSize: 48 }}>{'\u{1F50D}'}</div>
           <div style={s.loadingText}>Board nicht gefunden.</div>
-          <p style={s.messageDesc}>Bitte prüfe den Code und versuche es erneut.</p>
+          <p style={s.messageDesc}>Bitte pr{'\u00fc'}fe den Code und versuche es erneut.</p>
         </div>
       </div>
     );
@@ -135,9 +229,9 @@ export default function BoardPage({ code }) {
     return (
       <div style={s.page}>
         <div style={s.messageCard}>
-          <div style={{ fontSize: 48 }}>🔒</div>
+          <div style={{ fontSize: 48 }}>{'\u{1F512}'}</div>
           <div style={s.loadingText}>Dieses Board wurde geschlossen.</div>
-          <p style={s.messageDesc}>Fragt eure Lehrkraft, ob ein neues Board geöffnet wird.</p>
+          <p style={s.messageDesc}>Fragt eure Lehrkraft, ob ein neues Board ge{'\u00f6'}ffnet wird.</p>
         </div>
       </div>
     );
@@ -147,8 +241,8 @@ export default function BoardPage({ code }) {
     return (
       <div style={s.page}>
         <div style={s.nameCard}>
-          <h1 style={s.nameTitle}>📝 Willkommen!</h1>
-          <p style={s.nameDesc}>Wie heißt du oder deine Gruppe?</p>
+          <h1 style={s.nameTitle}>{'\u{1F4DD}'} Willkommen!</h1>
+          <p style={s.nameDesc}>Wie hei{'\u00df'}t du oder deine Gruppe?</p>
           <form onSubmit={handleSetName} style={{ display: 'flex', gap: 10, width: '100%' }}>
             <input
               type="text"
@@ -182,7 +276,17 @@ export default function BoardPage({ code }) {
                 {colPosts.map((p) => (
                   <div key={p._key} style={{ ...s.stickyNote, background: p.color || '#FFE0B2' }}>
                     <div style={s.noteAuthor}>{p.author}</div>
-                    <div style={s.noteText}>{p.text}</div>
+                    {p.imageUrl && (
+                      <img
+                        src={p.imageUrl}
+                        alt="Foto"
+                        loading="lazy"
+                        decoding="async"
+                        style={s.noteImage}
+                        onClick={() => setLightboxSrc(p.imageUrl)}
+                      />
+                    )}
+                    {p.text && <div style={s.noteText}>{p.text}</div>}
                     <LikeButton
                       postKey={p._key}
                       likes={p.likes}
@@ -197,23 +301,81 @@ export default function BoardPage({ code }) {
                   <textarea
                     value={noteText}
                     onChange={(e) => setNoteText(e.target.value)}
-                    placeholder="Eure Frage oder Idee..."
+                    placeholder={selectedFile ? 'Bildunterschrift (optional)...' : 'Eure Frage oder Idee...'}
                     autoFocus
                     rows={3}
                     style={s.addInput}
                   />
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => handleSubmit(ci)} style={s.sendBtn}>Senden</button>
-                    <button onClick={() => { setAddingCol(null); setNoteText(''); }} style={s.cancelBtn}>Abbrechen</button>
+
+                  {/* Photo preview */}
+                  {previewUrl && (
+                    <div style={s.previewContainer}>
+                      <img src={previewUrl} alt="Vorschau" style={s.previewImage} />
+                      <button onClick={clearPhoto} style={s.previewRemove}>{'\u2715'}</button>
+                    </div>
+                  )}
+
+                  {/* Upload progress */}
+                  {uploading && (
+                    <div style={s.uploadStatus}>
+                      <div style={s.progressBarOuter}>
+                        <div style={{ ...s.progressBarInner, width: `${uploadProgress}%` }} />
+                      </div>
+                      <span style={s.uploadText}>Wird hochgeladen... {uploadProgress}%</span>
+                    </div>
+                  )}
+
+                  {/* Upload error */}
+                  {uploadError && (
+                    <div style={s.uploadErrorBox}>
+                      <span style={s.uploadErrorText}>{uploadError}</span>
+                      <button onClick={() => handleSubmit(ci)} style={s.retryBtn}>Nochmal</button>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {/* Hidden file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleFileSelect}
+                      style={{ display: 'none' }}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      style={s.photoBtn}
+                      title="Foto aufnehmen oder ausw\u00e4hlen"
+                      disabled={uploading}
+                    >
+                      {'\u{1F4F7}'}
+                    </button>
+                    <button
+                      onClick={() => handleSubmit(ci)}
+                      style={{ ...s.sendBtn, opacity: uploading ? 0.5 : 1 }}
+                      disabled={uploading || (!noteText.trim() && !selectedFile)}
+                    >
+                      {uploading ? 'Wird gesendet...' : 'Senden'}
+                    </button>
+                    <button
+                      onClick={() => { setAddingCol(null); setNoteText(''); clearPhoto(); }}
+                      style={s.cancelBtn}
+                      disabled={uploading}
+                    >
+                      Abbrechen
+                    </button>
                   </div>
                 </div>
               ) : (
-                <button onClick={() => setAddingCol(ci)} style={s.addBtn}>+ Hinzufügen</button>
+                <button onClick={() => setAddingCol(ci)} style={s.addBtn}>+ Hinzuf{'\u00fc'}gen</button>
               )}
             </div>
           );
         })}
       </div>
+
+      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </div>
   );
 }
@@ -363,6 +525,14 @@ const s = {
     marginBottom: 4,
     opacity: 0.7,
   },
+  noteImage: {
+    width: '100%',
+    borderRadius: 8,
+    marginBottom: 6,
+    cursor: 'pointer',
+    objectFit: 'cover',
+    maxHeight: 240,
+  },
   noteText: {
     fontSize: 16,
     color: '#333',
@@ -419,5 +589,121 @@ const s = {
     border: '2px dashed rgba(255,107,53,0.3)',
     borderRadius: 12,
     cursor: 'pointer',
+  },
+  // Photo button
+  photoBtn: {
+    width: 44,
+    height: 44,
+    fontSize: 22,
+    background: 'rgba(255,107,53,0.1)',
+    border: '2px solid rgba(255,107,53,0.3)',
+    borderRadius: 12,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  // Photo preview
+  previewContainer: {
+    position: 'relative',
+    borderRadius: 10,
+    overflow: 'hidden',
+    border: '2px solid rgba(255,107,53,0.2)',
+  },
+  previewImage: {
+    width: '100%',
+    maxHeight: 180,
+    objectFit: 'cover',
+    display: 'block',
+    borderRadius: 8,
+  },
+  previewRemove: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 28,
+    height: 28,
+    background: 'rgba(0,0,0,0.5)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: 14,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Upload progress
+  uploadStatus: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  progressBarOuter: {
+    width: '100%',
+    height: 6,
+    background: 'rgba(0,0,0,0.08)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarInner: {
+    height: '100%',
+    background: '#FF6B35',
+    borderRadius: 3,
+    transition: 'width 0.2s ease',
+  },
+  uploadText: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    color: '#888',
+    fontWeight: 600,
+  },
+  // Upload error
+  uploadErrorBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 12px',
+    background: '#FFF3E0',
+    borderRadius: 10,
+  },
+  uploadErrorText: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 14,
+    color: '#E65100',
+    fontWeight: 600,
+    flex: 1,
+  },
+  retryBtn: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '6px 12px',
+    background: '#FF6B35',
+    color: 'white',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  // Lightbox
+  lightboxOverlay: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 10000,
+    background: 'rgba(0,0,0,0.85)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 20,
+  },
+  lightboxImg: {
+    maxWidth: '90vw',
+    maxHeight: '90vh',
+    objectFit: 'contain',
+    borderRadius: 12,
+    cursor: 'default',
   },
 };

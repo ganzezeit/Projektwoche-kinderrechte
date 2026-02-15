@@ -12,6 +12,23 @@ function generateCode() {
 
 const TIMEOUT_MS = 8000;
 
+function Lightbox({ src, onClose }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 11000,
+      background: 'rgba(0,0,0,0.85)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'pointer', padding: 20,
+    }} onClick={onClose}>
+      <img
+        src={src} alt="Foto"
+        style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12, cursor: 'default' }}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
+}
+
 function ConfirmDialog({ message, confirmLabel, onConfirm, onCancel, danger }) {
   return (
     <div style={s.confirmOverlay}>
@@ -51,6 +68,7 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
   // Saved boards
   const [savedBoards, setSavedBoards] = useState([]);
   const [viewingSavedBoard, setViewingSavedBoard] = useState(null);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
 
   const color = dayColor || '#FF6B35';
 
@@ -194,7 +212,7 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
       title: boardTitle,
       columns: boardCols,
       posts: posts.reduce((acc, p) => {
-        acc[p._key] = { text: p.text, author: p.author, column: p.column, color: p.color, timestamp: p.timestamp, likes: p.likes || null };
+        acc[p._key] = { text: p.text, author: p.author, column: p.column, color: p.color, timestamp: p.timestamp, likes: p.likes || null, imageUrl: p.imageUrl || null };
         return acc;
       }, {}),
       savedAt: Date.now(),
@@ -307,7 +325,14 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
                       {sbPosts.map(([key, p]) => (
                         <div key={key} style={{ ...s.stickyNote, background: p.color || '#FFE0B2' }}>
                           <div style={s.noteAuthor}>{p.author}</div>
-                          <div style={s.noteText}>{p.text}</div>
+                          {p.imageUrl && (
+                            <img
+                              src={p.imageUrl} alt="Foto" loading="lazy" decoding="async"
+                              style={{ width: '100%', borderRadius: 8, marginBottom: 4, cursor: 'pointer', objectFit: 'cover', maxHeight: 180 }}
+                              onClick={() => setLightboxSrc(p.imageUrl)}
+                            />
+                          )}
+                          {p.text && <div style={s.noteText}>{p.text}</div>}
                         </div>
                       ))}
                       {sbPosts.length === 0 && (
@@ -454,7 +479,14 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
                           <div style={s.noteAuthor}>{p.author}</div>
                           <button onClick={() => handleDeletePost(p._key)} style={s.deletePostBtn} title="L\u00f6schen">{'\u2715'}</button>
                         </div>
-                        <div style={s.noteText}>{p.text}</div>
+                        {p.imageUrl && (
+                          <img
+                            src={p.imageUrl} alt="Foto" loading="lazy" decoding="async"
+                            style={{ width: '100%', borderRadius: 8, marginBottom: 4, cursor: 'pointer', objectFit: 'cover', maxHeight: 180 }}
+                            onClick={() => setLightboxSrc(p.imageUrl)}
+                          />
+                        )}
+                        {p.text && <div style={s.noteText}>{p.text}</div>}
                       </div>
                     ))}
                     {colPosts.length === 0 && (
@@ -484,6 +516,8 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
           </div>
         </div>
       </div>
+
+      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </div>
   );
 }

@@ -13,6 +13,23 @@ function generateCode() {
 const DEFAULT_COLUMNS = ['Pause & Freizeit', 'Schule & Lernen', 'Mitbestimmung', 'Alltag'];
 const TIMEOUT_MS = 8000;
 
+function Lightbox({ src, onClose }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 5000,
+      background: 'rgba(0,0,0,0.85)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'pointer', padding: 20,
+    }} onClick={onClose}>
+      <img
+        src={src} alt="Foto"
+        style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12, cursor: 'default' }}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
+}
+
 // Confirmation dialog overlay
 function ConfirmDialog({ message, confirmLabel, onConfirm, onCancel, danger }) {
   return (
@@ -48,6 +65,7 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
   const [savedBoards, setSavedBoards] = useState([]);
   const [showSavedBoards, setShowSavedBoards] = useState(false);
   const [viewingSavedBoard, setViewingSavedBoard] = useState(null);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
 
   const cols = columns || DEFAULT_COLUMNS;
 
@@ -249,7 +267,7 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
       title: title || 'Fragen-Werkstatt',
       columns: cols,
       posts: posts.reduce((acc, p) => {
-        acc[p._key] = { text: p.text, author: p.author, column: p.column, color: p.color, timestamp: p.timestamp, likes: p.likes || null };
+        acc[p._key] = { text: p.text, author: p.author, column: p.column, color: p.color, timestamp: p.timestamp, likes: p.likes || null, imageUrl: p.imageUrl || null };
         return acc;
       }, {}),
       savedAt: Date.now(),
@@ -408,12 +426,19 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
                             <button
                               onClick={() => handleDeletePost(p._key)}
                               style={s.deletePostBtn}
-                              title="Beitrag löschen"
-                            >✕</button>
+                              title="Beitrag l\u00f6schen"
+                            >{'\u2715'}</button>
                           </div>
-                          <div style={s.noteText}>{p.text}</div>
+                          {p.imageUrl && (
+                            <img
+                              src={p.imageUrl} alt="Foto" loading="lazy" decoding="async"
+                              style={{ width: '100%', borderRadius: 8, marginBottom: 4, cursor: 'pointer', objectFit: 'cover', maxHeight: 180 }}
+                              onClick={() => setLightboxSrc(p.imageUrl)}
+                            />
+                          )}
+                          {p.text && <div style={s.noteText}>{p.text}</div>}
                           {likeCount > 0 && (
-                            <div style={s.likeInfo}>❤️ {likeCount}</div>
+                            <div style={s.likeInfo}>{'\u2764\uFE0F'} {likeCount}</div>
                           )}
                         </div>
                       );
@@ -447,6 +472,8 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
         </div>
       </div>
 
+      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+
       {/* F1: Read-only saved board overlay */}
       {viewingSavedBoard && (
         <div style={s.savedOverlay}>
@@ -469,7 +496,14 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
                       {sbPosts.map(([key, p]) => (
                         <div key={key} style={{ ...s.stickyNote, background: p.color || '#FFE0B2' }}>
                           <div style={s.noteAuthor}>{p.author}</div>
-                          <div style={s.noteText}>{p.text}</div>
+                          {p.imageUrl && (
+                            <img
+                              src={p.imageUrl} alt="Foto" loading="lazy" decoding="async"
+                              style={{ width: '100%', borderRadius: 8, marginBottom: 4, cursor: 'pointer', objectFit: 'cover', maxHeight: 180 }}
+                              onClick={() => setLightboxSrc(p.imageUrl)}
+                            />
+                          )}
+                          {p.text && <div style={s.noteText}>{p.text}</div>}
                         </div>
                       ))}
                       {sbPosts.length === 0 && (
