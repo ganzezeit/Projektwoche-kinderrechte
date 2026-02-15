@@ -430,7 +430,7 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
   }
 
   return (
-    <div style={s.overlay}>
+    <div style={s.overlay} className="board-overlay">
       {confirm && (
         <ConfirmDialog
           message={confirm.message}
@@ -443,7 +443,7 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
 
       <div style={s.container} className="board-creator-container">
         {/* Row 1: Back + title + actions */}
-        <div style={s.headerRow1}>
+        <div style={s.headerRow1} className="board-header-row">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button onClick={onClose} style={s.backBtn}>{'\u2190'}</button>
             <h1 style={{ ...s.title, color: dayColor }}>{'\u{1F4CB}'} Klassen-Board</h1>
@@ -499,7 +499,7 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
         </div>
 
         {/* Row 2: Centered QR code + code + URL */}
-        <div style={s.qrBar}>
+        <div style={s.qrBar} className="board-qr-bar">
           <div style={s.qrBarCenter}>
             <QRCodeSVG value={boardUrl} size={80} level="M" />
             <div style={s.qrBarInfo}>

@@ -67,11 +67,35 @@ button:focus-visible {
     margin: 1.5cm;
   }
 
-  /* Reset viewport constraints */
+  /* Reset ALL viewport constraints */
   html, body, #root {
     overflow: visible !important;
     height: auto !important;
+    width: auto !important;
+    position: static !important;
     background: white !important;
+  }
+
+  /* Convert the fixed overlay to a normal static block */
+  .board-overlay {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    display: block !important;
+    padding: 0 !important;
+    background: white !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .board-creator-container {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    display: block !important;
+    padding: 0 !important;
   }
 
   /* Show print header */
@@ -82,39 +106,43 @@ button:focus-visible {
     padding-bottom: 8px;
   }
 
-  /* Hide non-content elements */
-  .board-creator-container > div:first-child,  /* headerRow1 */
-  .board-creator-container > div:nth-child(3), /* qrBar */
+  /* Hide non-content: header row, QR bar, teacher inputs, delete buttons */
+  .board-header-row,
+  .board-qr-bar,
   .board-teacher-input,
   .board-post button {
     display: none !important;
   }
 
-  /* Columns: stack vertically, full width */
+  /* Board columns area: make fully visible */
   .board-columns-area {
     overflow: visible !important;
     flex: none !important;
     height: auto !important;
+    min-height: 0 !important;
   }
 
+  /* Column container: stack vertically */
   .board-columns-area > div {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 24px !important;
+    display: block !important;
     height: auto !important;
     overflow: visible !important;
   }
 
+  /* Each column: full width, vertical stack */
   .board-column {
     max-width: 100% !important;
     min-width: 100% !important;
+    width: 100% !important;
     overflow: visible !important;
-    break-inside: avoid;
-    page-break-inside: avoid;
+    display: block !important;
+    margin-bottom: 20px !important;
     border: 1px solid #ddd !important;
     box-shadow: none !important;
     border-radius: 8px !important;
     background: #fafafa !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .board-col-header {
@@ -130,11 +158,13 @@ button:focus-visible {
     max-height: none !important;
     height: auto !important;
     padding: 12px !important;
+    display: block !important;
   }
 
   .board-post {
     box-shadow: none !important;
     border: 1px solid #e0e0e0 !important;
+    margin-bottom: 8px !important;
     break-inside: avoid;
     page-break-inside: avoid;
   }
@@ -143,12 +173,5 @@ button:focus-visible {
     max-width: 400px !important;
     max-height: 300px !important;
     object-fit: contain !important;
-  }
-
-  /* Hide lightbox, confirm dialogs, saved board overlay */
-  [style*="position: fixed"][style*="z-index: 5000"],
-  [style*="position: fixed"][style*="z-index: 3000"],
-  [style*="position: fixed"][style*="z-index: 2500"] {
-    display: none !important;
   }
 }

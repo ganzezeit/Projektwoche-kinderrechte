@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { ref, set, push, remove, onValue } from 'firebase/database';
 import { db } from '../firebase';
 import { QRCodeSVG } from 'qrcode.react';
@@ -12,22 +12,95 @@ function generateCode() {
 
 const TIMEOUT_MS = 8000;
 
-function Lightbox({ src, onClose }) {
+function PhotoLightbox({ photos, initialIndex, onClose }) {
+  const [index, setIndex] = useState(initialIndex);
+  const touchStart = useRef(null);
+
+  const goPrev = useCallback(() => setIndex(i => (i > 0 ? i - 1 : photos.length - 1)), [photos.length]);
+  const goNext = useCallback(() => setIndex(i => (i < photos.length - 1 ? i + 1 : 0)), [photos.length]);
+
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowLeft') goPrev();
+      else if (e.key === 'ArrowRight') goNext();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose, goPrev, goNext]);
+
+  const handleTouchStart = (e) => { touchStart.current = e.touches[0].clientX; };
+  const handleTouchEnd = (e) => {
+    if (touchStart.current === null) return;
+    const diff = e.changedTouches[0].clientX - touchStart.current;
+    if (Math.abs(diff) > 50) { diff > 0 ? goPrev() : goNext(); }
+    touchStart.current = null;
+  };
+
+  const photo = photos[index];
+  if (!photo) return null;
+
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 11000,
-      background: 'rgba(0,0,0,0.85)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      cursor: 'pointer', padding: 20,
-    }} onClick={onClose}>
-      <img
-        src={src} alt="Foto"
-        style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12, cursor: 'default' }}
-        onClick={(e) => e.stopPropagation()}
-      />
+    <div
+      style={lbStyles.overlay}
+      onClick={onClose}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      {photos.length > 1 && (
+        <button onClick={(e) => { e.stopPropagation(); goPrev(); }} style={lbStyles.arrowLeft}>{'\u2039'}</button>
+      )}
+      <img src={photo.url} alt="Foto" style={lbStyles.image} onClick={(e) => e.stopPropagation()} />
+      {photos.length > 1 && (
+        <button onClick={(e) => { e.stopPropagation(); goNext(); }} style={lbStyles.arrowRight}>{'\u203A'}</button>
+      )}
+      <button onClick={onClose} style={lbStyles.closeBtn}>{'\u2715'}</button>
+      {photos.length > 1 && (
+        <div style={lbStyles.counter}>{index + 1} / {photos.length}</div>
+      )}
     </div>
   );
 }
+
+const lbStyles = {
+  overlay: {
+    position: 'fixed', inset: 0, zIndex: 11000,
+    background: 'rgba(0,0,0,0.88)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer',
+  },
+  image: {
+    maxWidth: '80vw', maxHeight: '85vh',
+    objectFit: 'contain', borderRadius: 8, cursor: 'default',
+  },
+  arrowLeft: {
+    position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)',
+    background: 'rgba(255,255,255,0.15)', border: 'none', color: 'white',
+    fontSize: 48, width: 56, height: 72, borderRadius: 12, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    backdropFilter: 'blur(4px)',
+  },
+  arrowRight: {
+    position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)',
+    background: 'rgba(255,255,255,0.15)', border: 'none', color: 'white',
+    fontSize: 48, width: 56, height: 72, borderRadius: 12, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    backdropFilter: 'blur(4px)',
+  },
+  closeBtn: {
+    position: 'absolute', top: 16, right: 20,
+    background: 'rgba(255,255,255,0.15)', border: 'none', color: 'white',
+    fontSize: 24, width: 44, height: 44, borderRadius: 22, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    backdropFilter: 'blur(4px)',
+  },
+  counter: {
+    position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+    fontFamily: "'Fredoka', sans-serif", fontSize: 16, fontWeight: 600,
+    color: 'rgba(255,255,255,0.8)', background: 'rgba(0,0,0,0.4)',
+    padding: '6px 16px', borderRadius: 20,
+  },
+};
 
 function ConfirmDialog({ message, confirmLabel, onConfirm, onCancel, danger }) {
   return (
@@ -68,7 +141,7 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
   // Saved boards
   const [savedBoards, setSavedBoards] = useState([]);
   const [viewingSavedBoard, setViewingSavedBoard] = useState(null);
-  const [lightboxSrc, setLightboxSrc] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
 
   const color = dayColor || '#FF6B35';
 
@@ -171,6 +244,18 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
   }, [code]);
 
   const boardUrl = code ? `${window.location.origin}/board/${code}` : '';
+
+  // Collect all photos for lightbox navigation
+  const allPhotos = useMemo(() => {
+    return posts
+      .filter(p => p.imageUrl)
+      .map(p => ({ url: p.imageUrl, key: p._key }));
+  }, [posts]);
+
+  const openLightbox = useCallback((imageUrl) => {
+    const idx = allPhotos.findIndex(p => p.url === imageUrl);
+    setLightboxIndex(idx >= 0 ? idx : 0);
+  }, [allPhotos]);
 
   const handleClearPosts = () => {
     setConfirm({
@@ -291,7 +376,7 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
   if (mode === 'saved-view' && viewingSavedBoard) {
     const sbCols = viewingSavedBoard.columns || [];
     return (
-      <div style={s.overlay}>
+      <div style={s.activeOverlay}>
         {confirm && (
           <ConfirmDialog
             message={confirm.message}
@@ -301,17 +386,17 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
             onCancel={() => setConfirm(null)}
           />
         )}
-        <div style={s.container}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-            <h2 style={{ ...s.title, color, margin: 0 }}>{'\u{1F4CB}'} {viewingSavedBoard.title}</h2>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setViewingSavedBoard(null); setMode('menu'); }} style={s.adminBtnGrey}>Zur{'\u00fc'}ck</button>
-              <button onClick={onClose} style={s.adminBtnGrey}>Schlie{'\u00df'}en</button>
+        <div style={s.activeContainer}>
+          <div style={s.headerRow1} className="board-header-row">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button onClick={() => { setViewingSavedBoard(null); setMode('menu'); }} style={s.backBtn}>{'\u2190'}</button>
+              <h2 style={{ ...s.title, color, margin: 0 }}>{'\u{1F4CB}'} {viewingSavedBoard.title}</h2>
             </div>
+            <button onClick={onClose} style={s.adminBtnGrey}>Schlie{'\u00df'}en</button>
           </div>
 
-          <div style={s.boardArea}>
-            <div style={s.colContainer}>
+          <div style={s.activeBoardArea}>
+            <div style={s.activeColContainer}>
               {sbCols.map((colName, ci) => {
                 const sbPosts = viewingSavedBoard.posts
                   ? Object.entries(viewingSavedBoard.posts)
@@ -319,17 +404,17 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
                       .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0))
                   : [];
                 return (
-                  <div key={ci} style={s.column}>
-                    <div style={{ ...s.colHeader, color }}>{colName}</div>
-                    <div style={s.colPosts}>
+                  <div key={ci} style={s.activeColumn}>
+                    <div style={{ ...s.activeColHeader, color }}>{colName}</div>
+                    <div style={s.activeColPosts}>
                       {sbPosts.map(([key, p]) => (
                         <div key={key} style={{ ...s.stickyNote, background: p.color || '#FFE0B2' }}>
                           <div style={s.noteAuthor}>{p.author}</div>
                           {p.imageUrl && (
                             <img
                               src={p.imageUrl} alt="Foto" loading="lazy" decoding="async"
-                              style={{ width: '100%', borderRadius: 8, marginBottom: 4, cursor: 'pointer', objectFit: 'cover', maxHeight: 180 }}
-                              onClick={() => setLightboxSrc(p.imageUrl)}
+                              style={s.noteImage}
+                              onClick={() => openLightbox(p.imageUrl)}
                             />
                           )}
                           {p.text && <div style={s.noteText}>{p.text}</div>}
@@ -345,6 +430,14 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
             </div>
           </div>
         </div>
+
+        {lightboxIndex !== null && allPhotos.length > 0 && (
+          <PhotoLightbox
+            photos={allPhotos}
+            initialIndex={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+          />
+        )}
       </div>
     );
   }
@@ -431,9 +524,9 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
     );
   }
 
-  // --- ACTIVE BOARD VIEW ---
+  // --- ACTIVE BOARD VIEW (compact layout) ---
   return (
-    <div style={s.overlay}>
+    <div style={s.activeOverlay} className="board-overlay">
       {confirm && (
         <ConfirmDialog
           message={confirm.message}
@@ -443,57 +536,83 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
           onCancel={() => setConfirm(null)}
         />
       )}
-      <div style={s.container}>
-        <div style={s.header}>
-          <h1 style={{ ...s.title, color }}>{'\u{1F4CB}'} {boardTitle}</h1>
+      <div style={s.activeContainer} className="board-creator-container">
+        {/* Row 1: Back + title + actions */}
+        <div style={s.headerRow1} className="board-header-row">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button onClick={onClose} style={s.backBtn}>{'\u2190'}</button>
+            <h1 style={{ ...s.title, color }}>{'\u{1F4CB}'} {boardTitle}</h1>
+          </div>
           <div style={s.adminRow}>
             <button onClick={handleSaveBoard} style={s.adminBtnGreen}>{'\u{1F4BE}'} Speichern</button>
+            <button onClick={() => window.print()} style={s.adminBtnPdf}>{'\u{1F4C4}'} Als PDF</button>
             <button onClick={handleClearPosts} style={s.adminBtnOrange}>Leeren</button>
             <button onClick={handleCloseBoard} style={s.adminBtnGrey}>Schlie{'\u00df'}en</button>
           </div>
         </div>
 
-        <div style={s.qrRow}>
-          <div style={s.qrCard}>
-            <QRCodeSVG value={boardUrl} size={150} level="M" />
-            <div style={s.codeLabel}>Code: <strong>{code}</strong></div>
-            <div style={s.urlLabel}>{boardUrl}</div>
-          </div>
-          <div style={s.infoCard}>
-            <p style={s.infoText}>{'\u{1F4F1}'} Scannt den QR-Code!</p>
-            <p style={s.infoText}>{'\u{1F465}'} {posts.length} Beitr{'\u00e4'}ge</p>
+        {/* Print-only header */}
+        <div className="board-print-header" style={{ display: 'none' }}>
+          <h1 style={{ fontFamily: "'Lilita One', cursive", fontSize: 28, color, margin: '0 0 4px' }}>
+            {boardTitle} — Klassen-Board Export
+          </h1>
+          <p style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14, color: '#666', margin: 0 }}>
+            {new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} — {posts.length} Beitr{'\u00e4'}ge
+          </p>
+        </div>
+
+        {/* Row 2: Centered QR code + code + URL */}
+        <div style={s.qrBar} className="board-qr-bar">
+          <div style={s.qrBarCenter}>
+            <QRCodeSVG value={boardUrl} size={80} level="M" />
+            <div style={s.qrBarInfo}>
+              <span style={s.qrBarCode}>Code: <strong>{code}</strong></span>
+              <span style={s.qrBarUrl}>{boardUrl}</span>
+              <span style={s.qrBarMeta}>{'\u{1F465}'} {posts.length} Beitr{'\u00e4'}ge</span>
+            </div>
           </div>
         </div>
 
-        <div style={s.boardArea}>
-          <div style={s.colContainer}>
+        {/* Columns — fill remaining height */}
+        <div style={s.activeBoardArea} className="board-columns-area">
+          <div style={s.activeColContainer}>
             {boardCols.map((colName, ci) => {
               const colPosts = posts.filter(p => p.column === ci);
               return (
-                <div key={ci} style={s.column}>
-                  <div style={{ ...s.colHeader, color }}>{colName}</div>
-                  <div style={s.colPosts}>
-                    {colPosts.map((p) => (
-                      <div key={p._key} style={{ ...s.stickyNote, background: p.color || '#FFE0B2' }}>
-                        <div style={s.noteHeader}>
-                          <div style={s.noteAuthor}>{p.author}</div>
-                          <button onClick={() => handleDeletePost(p._key)} style={s.deletePostBtn} title="L\u00f6schen">{'\u2715'}</button>
+                <div key={ci} style={s.activeColumn} className="board-column">
+                  <div style={{ ...s.activeColHeader, color }} className="board-col-header">{colName}</div>
+                  <div style={s.activeColPosts} className="board-col-posts">
+                    {colPosts.map((p) => {
+                      const likeCount = p.likes ? Object.keys(p.likes).length : 0;
+                      return (
+                        <div key={p._key} className="board-post" style={{
+                          ...s.stickyNote,
+                          background: p.color || '#FFE0B2',
+                          border: likeCount >= 3 ? '2px solid rgba(231,76,60,0.3)' : 'none',
+                        }}>
+                          <div style={s.noteHeader}>
+                            <div style={s.noteAuthor}>{p.author}</div>
+                            <button onClick={() => handleDeletePost(p._key)} style={s.deletePostBtn} title="L\u00f6schen">{'\u2715'}</button>
+                          </div>
+                          {p.imageUrl && (
+                            <img
+                              src={p.imageUrl} alt="Foto" loading="lazy" decoding="async"
+                              style={s.noteImage}
+                              onClick={() => openLightbox(p.imageUrl)}
+                            />
+                          )}
+                          {p.text && <div style={s.noteText}>{p.text}</div>}
+                          {likeCount > 0 && (
+                            <div style={s.likeInfo}>{'\u2764\uFE0F'} {likeCount}</div>
+                          )}
                         </div>
-                        {p.imageUrl && (
-                          <img
-                            src={p.imageUrl} alt="Foto" loading="lazy" decoding="async"
-                            style={{ width: '100%', borderRadius: 8, marginBottom: 4, cursor: 'pointer', objectFit: 'cover', maxHeight: 180 }}
-                            onClick={() => setLightboxSrc(p.imageUrl)}
-                          />
-                        )}
-                        {p.text && <div style={s.noteText}>{p.text}</div>}
-                      </div>
-                    ))}
+                      );
+                    })}
                     {colPosts.length === 0 && (
                       <div style={s.emptyCol}>Noch keine Beitr{'\u00e4'}ge</div>
                     )}
                   </div>
-                  <div style={s.teacherInput}>
+                  <div style={s.activeTeacherInput} className="board-teacher-input">
                     <input
                       type="text"
                       value={teacherTexts[ci] || ''}
@@ -517,7 +636,14 @@ export default function QuickBoardDialog({ onClose, dayColor }) {
         </div>
       </div>
 
-      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+      {/* Photo lightbox with navigation */}
+      {lightboxIndex !== null && allPhotos.length > 0 && (
+        <PhotoLightbox
+          photos={allPhotos}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
     </div>
   );
 }
@@ -535,6 +661,29 @@ const s = {
     justifyContent: 'center',
     padding: 20,
     overflowY: 'auto',
+  },
+  // Active board overlay — full screen, no centering
+  activeOverlay: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 9500,
+    background: 'rgba(255, 250, 245, 0.95)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    display: 'flex',
+    flexDirection: 'column',
+    padding: '12px 16px',
+    overflow: 'hidden',
+  },
+  activeContainer: {
+    width: '100%',
+    maxWidth: 1400,
+    height: '100%',
+    margin: '0 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    overflow: 'hidden',
   },
   container: {
     width: '100%',
@@ -651,138 +800,171 @@ const s = {
     borderRadius: 14,
     cursor: 'pointer',
   },
-  header: {
+  // Compact header row
+  headerRow1: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 8,
+    flexShrink: 0,
+  },
+  backBtn: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 20,
+    fontWeight: 700,
+    padding: '4px 10px',
+    background: 'rgba(0,0,0,0.06)',
+    border: 'none',
+    borderRadius: 10,
+    cursor: 'pointer',
+    color: '#555',
+    lineHeight: 1,
   },
   adminRow: {
     display: 'flex',
-    gap: 8,
+    gap: 6,
     flexWrap: 'wrap',
     alignItems: 'center',
   },
   adminBtnGreen: {
     fontFamily: "'Fredoka', sans-serif",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 600,
-    padding: '8px 14px',
+    padding: '6px 12px',
     background: '#4CAF50',
     color: 'white',
     border: 'none',
-    borderRadius: 10,
+    borderRadius: 8,
+    cursor: 'pointer',
+  },
+  adminBtnPdf: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '6px 12px',
+    background: '#1976D2',
+    color: 'white',
+    border: 'none',
+    borderRadius: 8,
     cursor: 'pointer',
   },
   adminBtnOrange: {
     fontFamily: "'Fredoka', sans-serif",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 600,
-    padding: '8px 14px',
+    padding: '6px 12px',
     background: '#FF6B35',
     color: 'white',
     border: 'none',
-    borderRadius: 10,
+    borderRadius: 8,
     cursor: 'pointer',
   },
   adminBtnGrey: {
     fontFamily: "'Fredoka', sans-serif",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 600,
-    padding: '8px 14px',
+    padding: '6px 12px',
     background: 'rgba(0,0,0,0.08)',
     color: '#555',
     border: 'none',
-    borderRadius: 10,
+    borderRadius: 8,
     cursor: 'pointer',
   },
-  qrRow: {
+  // Compact QR bar
+  qrBar: {
     display: 'flex',
-    gap: 20,
-    flexWrap: 'wrap',
     justifyContent: 'center',
+    flexShrink: 0,
+    padding: '4px 0',
   },
-  qrCard: {
-    background: 'white',
-    borderRadius: 20,
-    padding: '20px 24px',
-    boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+  qrBarCenter: {
     display: 'flex',
-    flexDirection: 'column',
     alignItems: 'center',
-    gap: 10,
-  },
-  codeLabel: {
-    fontFamily: "'Baloo 2', cursive",
-    fontSize: 20,
-    color: '#333',
-    letterSpacing: 3,
-  },
-  urlLabel: {
-    fontFamily: "'Fredoka', sans-serif",
-    fontSize: 12,
-    color: '#999',
-    wordBreak: 'break-all',
-    textAlign: 'center',
-    maxWidth: 200,
-  },
-  infoCard: {
-    background: 'white',
-    borderRadius: 20,
-    padding: '20px 24px',
-    boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  infoText: {
-    fontFamily: "'Fredoka', sans-serif",
-    fontSize: 18,
-    color: '#555',
-    fontWeight: 600,
-    margin: 0,
-  },
-  boardArea: {
-    flex: 1,
-    minHeight: 0,
-    overflowX: 'auto',
-    overflowY: 'auto',
-    WebkitOverflowScrolling: 'touch',
-  },
-  colContainer: {
-    display: 'flex',
     gap: 12,
-    minHeight: 200,
-    minWidth: 'min-content',
-  },
-  column: {
-    flex: '1 1 0',
-    minWidth: 160,
-    maxWidth: 300,
-    background: 'rgba(255,255,255,0.7)',
-    borderRadius: 16,
-    padding: 10,
+    background: 'white',
+    borderRadius: 14,
+    padding: '6px 16px',
     boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
   },
-  colHeader: {
+  qrBarInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+  },
+  qrBarCode: {
+    fontFamily: "'Baloo 2', cursive",
+    fontSize: 16,
+    color: '#333',
+    letterSpacing: 2,
+  },
+  qrBarUrl: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 11,
+    color: '#999',
+    wordBreak: 'break-all',
+    lineHeight: 1.2,
+  },
+  qrBarMeta: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    color: '#555',
+    fontWeight: 600,
+  },
+  // Active board columns — full height, sticky header/footer
+  activeBoardArea: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  activeColContainer: {
+    display: 'flex',
+    gap: 10,
+    height: '100%',
+    minWidth: 'min-content',
+    overflow: 'hidden',
+  },
+  activeColumn: {
+    flex: '1 1 0',
+    minWidth: 160,
+    maxWidth: 320,
+    background: 'rgba(255,255,255,0.7)',
+    borderRadius: 14,
+    boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  activeColHeader: {
     fontFamily: "'Lilita One', cursive",
     fontSize: 15,
     textAlign: 'center',
-    marginBottom: 8,
-    paddingBottom: 6,
+    padding: '8px 10px 6px',
     borderBottom: '2px solid rgba(0,0,0,0.08)',
+    flexShrink: 0,
   },
-  colPosts: {
+  activeColPosts: {
+    flex: 1,
+    overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    padding: '6px 8px',
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
   },
+  activeTeacherInput: {
+    display: 'flex',
+    gap: 4,
+    padding: '6px 8px',
+    borderTop: '1px solid rgba(0,0,0,0.06)',
+    flexShrink: 0,
+  },
   stickyNote: {
     borderRadius: 10,
-    padding: '8px 10px',
+    padding: '8px 12px',
     boxShadow: '0 2px 6px rgba(0,0,0,0.07)',
+    position: 'relative',
+    flexShrink: 0,
   },
   noteHeader: {
     display: 'flex',
@@ -806,28 +988,36 @@ const s = {
     borderRadius: 6,
     lineHeight: 1,
   },
+  noteImage: {
+    width: '100%',
+    borderRadius: 8,
+    marginBottom: 4,
+    cursor: 'pointer',
+    objectFit: 'cover',
+    maxHeight: 180,
+  },
   noteText: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#333',
     fontWeight: 600,
     fontFamily: "'Fredoka', sans-serif",
     lineHeight: 1.4,
   },
+  likeInfo: {
+    fontSize: 13,
+    color: '#E74C3C',
+    fontFamily: "'Fredoka', sans-serif",
+    fontWeight: 600,
+    marginTop: 4,
+  },
   emptyCol: {
     fontFamily: "'Fredoka', sans-serif",
-    fontSize: 13,
+    fontSize: 14,
     color: '#aaa',
     fontWeight: 600,
     textAlign: 'center',
-    padding: '14px 6px',
+    padding: '16px 8px',
     fontStyle: 'italic',
-  },
-  teacherInput: {
-    display: 'flex',
-    gap: 4,
-    marginTop: 8,
-    paddingTop: 8,
-    borderTop: '1px solid rgba(0,0,0,0.06)',
   },
   teacherInputField: {
     flex: 1,
