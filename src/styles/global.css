@@ -1,0 +1,61 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: linear-gradient(135deg, #FFE5D9 0%, #D4E4F7 100%);
+  color: #2D2D2D;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Lilita One', cursive;
+  font-weight: 400;
+  color: #2D2D2D;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.04);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.25);
+}
+
+::selection {
+  background: rgba(0, 180, 216, 0.3);
+}
+
+button {
+  font-family: 'Fredoka', sans-serif;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  background: none;
+  color: inherit;
+}
+
+button:focus-visible {
+  outline: 3px solid #00B4D8;
+  outline-offset: 2px;
+}
+
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}

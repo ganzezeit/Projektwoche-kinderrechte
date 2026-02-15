@@ -1,0 +1,9 @@
+export const INITIAL_ENERGY = 100;
+export const MAX_ENERGY = 100;
+export const LOW_ENERGY_THRESHOLD = 30; // Force energizer below 30%
+export const ENERGIZER_RESTORE_MIN = 30;
+export const ENERGIZER_RESTORE_MAX = 40;
+export const STORAGE_KEY = 'weltverbinder-save-v2';
+export const CHARACTER_EMOJI = '\u{1F9D1}\u200D\u{1F680}';
+export const TEACHER_PANEL_CLICKS = 3;
+export const TEACHER_PANEL_TIMEOUT = 800;
