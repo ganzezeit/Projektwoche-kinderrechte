@@ -97,6 +97,7 @@ export default function LandeskundeViewer({ mode, dayColor, onComplete }) {
             ref={imgRef}
             src={`/images/landeskunde/${slide.image}`}
             alt={slide.title}
+            loading="lazy"
             style={styles.image}
             onLoad={computeImageRect}
             onError={(e) => { e.target.style.display = 'none'; }}

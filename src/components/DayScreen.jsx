@@ -71,6 +71,7 @@ function TaskIcon({ src, alt, size, fallback, locked }) {
       <img
         src={src}
         alt={alt}
+        loading="lazy"
         style={{
           width: size,
           height: size,
@@ -117,6 +118,7 @@ export default function DayScreen({ day, activeStepIndex, completedSteps, onStep
               <img
                 src={`/images/ui/title-tag${day.id}.png`}
                 alt={`Tag ${day.id}`}
+                loading="lazy"
                 style={{ height: 70, width: 'auto', verticalAlign: 'middle' }}
                 onError={(e) => {
                   e.target.style.display = 'none';

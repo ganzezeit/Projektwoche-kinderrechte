@@ -136,6 +136,7 @@ function DayIcon({ src, alt, size, fallback }) {
       <img
         src={src}
         alt={alt}
+        loading="lazy"
         style={{
           width: size, height: size,
           objectFit: 'contain',

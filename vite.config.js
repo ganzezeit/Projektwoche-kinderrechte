@@ -8,4 +8,14 @@ export default defineConfig({
     open: true
   },
   appType: 'spa',
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split Firebase SDK into separate cacheable chunk
+          firebase: ['firebase/app', 'firebase/database'],
+        },
+      },
+    },
+  },
 });

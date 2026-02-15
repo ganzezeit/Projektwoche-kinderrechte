@@ -121,6 +121,7 @@ export default function ActivityScreen({ step, dayColor, onComplete }) {
         <img
           src={content.image}
           alt=""
+          loading="lazy"
           style={styles.image}
           onError={e => { e.target.style.display = 'none'; }}
         />

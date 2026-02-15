@@ -1,27 +1,29 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { DAYS } from '../data/days';
 import { loadState, saveState, resetState } from '../utils/persistence';
 import { setVolume, playClickSound, playSuccessSound, playCompleteSound } from '../utils/audio';
 import { audioManager } from '../utils/audioManager';
 import { LOW_ENERGY_THRESHOLD, MAX_ENERGY, CLASS_STORAGE_KEY } from '../utils/constants';
-import { subscribeToClass, saveClassState, setIsRemoteUpdate } from '../utils/firebasePersistence';
 
-import AnimatedBackground from './AnimatedBackground';
-import ClassSetupScreen from './ClassSetupScreen';
+// Eager: always visible or on first screen
 import SplashScreen from './SplashScreen';
-import WochenplanScreen from './WochenplanScreen';
-import ProjektregelnScreen from './ProjektregelnScreen';
-import EnergizerIchStimmeZu from './EnergizerIchStimmeZu';
-import LernkartenGame from './LernkartenGame';
 import MapScreen from './MapScreen';
-import DayScreen from './DayScreen';
-import DayIntroScreen from './DayIntroScreen';
-import StepViewer from './StepViewer';
-import EnergizerScreen from './EnergizerScreen';
-import TeacherPanel from './TeacherPanel';
+import AnimatedBackground from './AnimatedBackground';
 import TopBar from './TopBar';
-import QuickBoardDialog from './QuickBoardDialog';
 import Confetti from './Confetti';
+
+// Lazy: loaded on demand when screen/feature is needed
+const ClassSetupScreen = lazy(() => import('./ClassSetupScreen'));
+const WochenplanScreen = lazy(() => import('./WochenplanScreen'));
+const ProjektregelnScreen = lazy(() => import('./ProjektregelnScreen'));
+const EnergizerIchStimmeZu = lazy(() => import('./EnergizerIchStimmeZu'));
+const LernkartenGame = lazy(() => import('./LernkartenGame'));
+const DayScreen = lazy(() => import('./DayScreen'));
+const DayIntroScreen = lazy(() => import('./DayIntroScreen'));
+const StepViewer = lazy(() => import('./StepViewer'));
+const EnergizerScreen = lazy(() => import('./EnergizerScreen'));
+const TeacherPanel = lazy(() => import('./TeacherPanel'));
+const QuickBoardDialog = lazy(() => import('./QuickBoardDialog'));
 
 /*
   Screen flow:
@@ -95,48 +97,42 @@ export default function App() {
   useEffect(() => { saveState(state); }, [state]);
   useEffect(() => { setVolume(state.volume); }, [state.volume]);
 
-  // F4: Firebase sync — subscribe to class state
+  // F4: Firebase sync — subscribe to class state (dynamic import: Firebase loads only when needed)
   useEffect(() => {
     if (!className) return;
-    const unsub = subscribeToClass(className, (remoteState) => {
-      if (remoteState === null) {
-        // New class — no data in Firebase yet. Keep current (default) state.
-        // The save effect will write it to Firebase shortly.
-        return;
-      }
-      try {
-        isRemoteUpdateRef.current = true;
-        setIsRemoteUpdate(true);
-        setState(prev => ({
-          ...remoteState,
-          volume: prev.volume,
-          // Ensure arrays survive Firebase round-trip
-          completedDays: Array.isArray(remoteState.completedDays) ? remoteState.completedDays : [],
-          usedEnergizers: Array.isArray(remoteState.usedEnergizers) ? remoteState.usedEnergizers : [],
-          completedSteps: (remoteState.completedSteps && typeof remoteState.completedSteps === 'object') ? remoteState.completedSteps : {},
-          dayIntroSeen: (remoteState.dayIntroSeen && typeof remoteState.dayIntroSeen === 'object') ? remoteState.dayIntroSeen : {},
-        }));
-      } catch (err) {
-        console.error('[App] Error applying remote state:', err);
-      }
-      // Reset flag after React processes the update
-      setTimeout(() => {
-        isRemoteUpdateRef.current = false;
-        setIsRemoteUpdate(false);
-      }, 100);
-    });
-    return () => unsub();
+    let unsub = () => {};
+    let cancelled = false;
+    import('../utils/firebasePersistence').then(({ subscribeToClass, setIsRemoteUpdate: setRemote }) => {
+      if (cancelled) return;
+      unsub = subscribeToClass(className, (remoteState) => {
+        if (remoteState === null) return; // New class — no data yet
+        try {
+          isRemoteUpdateRef.current = true;
+          setRemote(true);
+          setState(prev => ({
+            ...remoteState,
+            volume: prev.volume,
+            completedDays: Array.isArray(remoteState.completedDays) ? remoteState.completedDays : [],
+            usedEnergizers: Array.isArray(remoteState.usedEnergizers) ? remoteState.usedEnergizers : [],
+            completedSteps: (remoteState.completedSteps && typeof remoteState.completedSteps === 'object') ? remoteState.completedSteps : {},
+            dayIntroSeen: (remoteState.dayIntroSeen && typeof remoteState.dayIntroSeen === 'object') ? remoteState.dayIntroSeen : {},
+          }));
+        } catch (err) {
+          console.error('[App] Error applying remote state:', err);
+        }
+        setTimeout(() => { isRemoteUpdateRef.current = false; setRemote(false); }, 100);
+      });
+    }).catch(err => console.error('[App] Firebase load error:', err));
+    return () => { cancelled = true; unsub(); };
   }, [className]);
 
-  // F4: Firebase sync — save state to Firebase on changes
+  // F4: Firebase sync — save state to Firebase on changes (dynamic import)
   useEffect(() => {
     if (!className) return;
     if (isRemoteUpdateRef.current) return;
-    try {
-      saveClassState(className, state);
-    } catch (err) {
-      console.error('[App] Error saving to Firebase:', err);
-    }
+    import('../utils/firebasePersistence').then(({ saveClassState }) => {
+      if (!isRemoteUpdateRef.current) saveClassState(className, state);
+    }).catch(err => console.error('[App] Firebase save error:', err));
   }, [state, className]);
 
   // Pre-init audioManager on mount (async, no user gesture needed)
@@ -487,7 +483,11 @@ export default function App() {
 
   // F4: Show class setup if no class selected
   if (!className) {
-    return <ClassSetupScreen onClassSelected={handleClassSelected} />;
+    return (
+      <Suspense fallback={<div style={{ width: '100%', height: '100vh', background: 'linear-gradient(160deg, #FFE5D9 0%, #D4E4F7 100%)' }} />}>
+        <ClassSetupScreen onClassSelected={handleClassSelected} />
+      </Suspense>
+    );
   }
 
   return (
@@ -515,10 +515,6 @@ export default function App() {
         height: '100%',
       }}>
         {screen === 'splash' && <SplashScreen onStart={handleSplashStart} />}
-        {screen === 'wochenplan' && <WochenplanScreen onContinue={handleWochenplanDone} />}
-        {screen === 'projektregeln' && <ProjektregelnScreen onContinue={handleProjektregelnDone} />}
-        {screen === 'ichStimmeZu' && <EnergizerIchStimmeZu onComplete={handleIchStimmeZuDone} />}
-        {screen === 'lernkarten' && <LernkartenGame onComplete={handleLernkartenDone} />}
 
         {screen === 'map' && (
           <MapScreen
@@ -528,47 +524,55 @@ export default function App() {
           />
         )}
 
-        {screen === 'dayIntro' && dayData && (
-          <DayIntroScreen day={dayData} onContinue={handleDayIntroDone} />
-        )}
+        <Suspense fallback={null}>
+          {screen === 'wochenplan' && <WochenplanScreen onContinue={handleWochenplanDone} />}
+          {screen === 'projektregeln' && <ProjektregelnScreen onContinue={handleProjektregelnDone} />}
+          {screen === 'ichStimmeZu' && <EnergizerIchStimmeZu onComplete={handleIchStimmeZuDone} />}
+          {screen === 'lernkarten' && <LernkartenGame onComplete={handleLernkartenDone} />}
 
-        {screen === 'day' && dayData && (
-          <DayScreen
-            day={dayData}
-            activeStepIndex={activeStepIdx}
-            completedSteps={state.completedSteps}
-            onStepClick={handleStepClick}
-            onBack={handleBackToMap}
-          />
-        )}
+          {screen === 'dayIntro' && dayData && (
+            <DayIntroScreen day={dayData} onContinue={handleDayIntroDone} />
+          )}
 
-        {screen === 'step' && dayData && viewingStepIndex !== null && (
-          <>
-            <div style={{ position: 'fixed', inset: 0, zIndex: 1400, overflow: 'hidden' }}>
-              <AnimatedBackground
-                basePath={`/images/day-backgrounds/tag${dayData.id}-background`}
-                fallbackGradient={`linear-gradient(160deg, #FFF8F0 0%, ${dayData.color}15 100%)`}
-              />
-            </div>
-            <StepViewer
-              step={dayData.steps[viewingStepIndex]}
-              dayColor={dayData.color}
-              onComplete={handleStepComplete}
-              onBack={handleStepBack}
+          {screen === 'day' && dayData && (
+            <DayScreen
+              day={dayData}
+              activeStepIndex={activeStepIdx}
+              completedSteps={state.completedSteps}
+              onStepClick={handleStepClick}
+              onBack={handleBackToMap}
             />
-          </>
-        )}
+          )}
 
-        {screen === 'energizer' && (
-          <EnergizerScreen
-            usedEnergizers={state.usedEnergizers}
-            dayColor={dayData?.color || '#FF6B35'}
-            onComplete={handleEnergizerComplete}
-          />
-        )}
+          {screen === 'step' && dayData && viewingStepIndex !== null && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 1400, overflow: 'hidden' }}>
+                <AnimatedBackground
+                  basePath={`/images/day-backgrounds/tag${dayData.id}-background`}
+                  fallbackGradient={`linear-gradient(160deg, #FFF8F0 0%, ${dayData.color}15 100%)`}
+                />
+              </div>
+              <StepViewer
+                step={dayData.steps[viewingStepIndex]}
+                dayColor={dayData.color}
+                onComplete={handleStepComplete}
+                onBack={handleStepBack}
+              />
+            </>
+          )}
+
+          {screen === 'energizer' && (
+            <EnergizerScreen
+              usedEnergizers={state.usedEnergizers}
+              dayColor={dayData?.color || '#FF6B35'}
+              onComplete={handleEnergizerComplete}
+            />
+          )}
+        </Suspense>
       </div>
 
       {showTeacherPanel && (
+        <Suspense fallback={null}>
         <TeacherPanel
           currentDay={selectedDay || state.currentDay}
           currentStep={activeStepIdx + 1}
@@ -588,13 +592,16 @@ export default function App() {
           onNewClass={handleNewClass}
           onResetClass={handleResetClass}
         />
+        </Suspense>
       )}
 
       {showQuickBoard && (
-        <QuickBoardDialog
-          onClose={() => setShowQuickBoard(false)}
-          dayColor={dayData?.color || '#FF6B35'}
-        />
+        <Suspense fallback={null}>
+          <QuickBoardDialog
+            onClose={() => setShowQuickBoard(false)}
+            dayColor={dayData?.color || '#FF6B35'}
+          />
+        </Suspense>
       )}
 
       {/* Bottom logo bar — visible on map, day, dayIntro screens */}
@@ -619,11 +626,13 @@ export default function App() {
           <img
             src="/images/ui/logo-lebenshilfe.png"
             alt="Lebenshilfe Berlin"
+            loading="lazy"
             style={{ height: '70%', width: 'auto', objectFit: 'contain' }}
           />
           <img
             src="/images/ui/logo-zukunftswerkstatt.png"
             alt="LHS Zukunftswerkstatt"
+            loading="lazy"
             style={{ height: '70%', width: 'auto', objectFit: 'contain' }}
           />
         </div>
