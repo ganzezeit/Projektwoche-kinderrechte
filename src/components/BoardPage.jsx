@@ -71,7 +71,8 @@ export default function BoardPage({ code }) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState(null);
-  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
 
   // Lightbox state
   const [lightboxSrc, setLightboxSrc] = useState(null);
@@ -333,23 +334,44 @@ export default function BoardPage({ code }) {
                     </div>
                   )}
 
+                  {/* Hidden file inputs */}
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFileSelect}
+                    style={{ display: 'none' }}
+                  />
+                  <input
+                    ref={galleryInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileSelect}
+                    style={{ display: 'none' }}
+                  />
+
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {/* Hidden file input */}
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFileSelect}
-                      style={{ display: 'none' }}
-                    />
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      style={s.photoBtn}
-                      title="Foto aufnehmen oder ausw\u00e4hlen"
-                      disabled={uploading}
-                    >
-                      {'\u{1F4F7}'}
-                    </button>
+                    <div style={s.photoBtnGroup}>
+                      <button
+                        onClick={() => cameraInputRef.current?.click()}
+                        style={s.photoBtn}
+                        disabled={uploading}
+                      >
+                        {'\u{1F4F7}'}
+                      </button>
+                      <span style={s.photoBtnLabel}>Foto</span>
+                    </div>
+                    <div style={s.photoBtnGroup}>
+                      <button
+                        onClick={() => galleryInputRef.current?.click()}
+                        style={s.photoBtn}
+                        disabled={uploading}
+                      >
+                        {'\u{1F5BC}\uFE0F'}
+                      </button>
+                      <span style={s.photoBtnLabel}>Galerie</span>
+                    </div>
                     <button
                       onClick={() => handleSubmit(ci)}
                       style={{ ...s.sendBtn, opacity: uploading ? 0.5 : 1 }}
@@ -589,7 +611,14 @@ const s = {
     borderRadius: 12,
     cursor: 'pointer',
   },
-  // Photo button
+  // Photo buttons
+  photoBtnGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 2,
+    flexShrink: 0,
+  },
   photoBtn: {
     width: 44,
     height: 44,
@@ -601,7 +630,12 @@ const s = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    flexShrink: 0,
+  },
+  photoBtnLabel: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#999',
   },
   // Photo preview
   previewContainer: {
