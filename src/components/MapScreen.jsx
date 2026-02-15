@@ -281,7 +281,6 @@ const styles = {
   container: {
     position: 'fixed',
     inset: 0,
-    paddingTop: 56,
     overflow: 'hidden',
   },
   title: {

@@ -3,9 +3,11 @@ import { DAYS } from '../data/days';
 import { loadState, saveState, resetState } from '../utils/persistence';
 import { setVolume, playClickSound, playSuccessSound, playCompleteSound } from '../utils/audio';
 import { audioManager } from '../utils/audioManager';
-import { LOW_ENERGY_THRESHOLD, MAX_ENERGY } from '../utils/constants';
+import { LOW_ENERGY_THRESHOLD, MAX_ENERGY, CLASS_STORAGE_KEY } from '../utils/constants';
+import { subscribeToClass, saveClassState, setIsRemoteUpdate } from '../utils/firebasePersistence';
 
 import AnimatedBackground from './AnimatedBackground';
+import ClassSetupScreen from './ClassSetupScreen';
 import SplashScreen from './SplashScreen';
 import WochenplanScreen from './WochenplanScreen';
 import ProjektregelnScreen from './ProjektregelnScreen';
@@ -18,6 +20,7 @@ import StepViewer from './StepViewer';
 import EnergizerScreen from './EnergizerScreen';
 import TeacherPanel from './TeacherPanel';
 import TopBar from './TopBar';
+import QuickBoardDialog from './QuickBoardDialog';
 import Confetti from './Confetti';
 
 /*
@@ -38,6 +41,13 @@ export default function App() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [pendingStepAfterEnergizer, setPendingStepAfterEnergizer] = useState(null);
   const [energyFloat, setEnergyFloat] = useState(null);
+  const [showQuickBoard, setShowQuickBoard] = useState(false);
+
+  // F4: Class system
+  const [className, setClassName] = useState(() => {
+    try { return localStorage.getItem(CLASS_STORAGE_KEY) || null; } catch { return null; }
+  });
+  const isRemoteUpdateRef = useRef(false);
 
   // Transition state
   const [transitionPhase, setTransitionPhase] = useState('visible'); // 'visible' | 'fading-out' | 'fading-in'
@@ -81,9 +91,53 @@ export default function App() {
 
   const screenOpacity = transitionPhase === 'fading-out' ? 0 : 1;
 
-  // Persist on every state change
+  // Persist on every state change (localStorage always as fallback)
   useEffect(() => { saveState(state); }, [state]);
   useEffect(() => { setVolume(state.volume); }, [state.volume]);
+
+  // F4: Firebase sync — subscribe to class state
+  useEffect(() => {
+    if (!className) return;
+    const unsub = subscribeToClass(className, (remoteState) => {
+      if (remoteState === null) {
+        // New class — no data in Firebase yet. Keep current (default) state.
+        // The save effect will write it to Firebase shortly.
+        return;
+      }
+      try {
+        isRemoteUpdateRef.current = true;
+        setIsRemoteUpdate(true);
+        setState(prev => ({
+          ...remoteState,
+          volume: prev.volume,
+          // Ensure arrays survive Firebase round-trip
+          completedDays: Array.isArray(remoteState.completedDays) ? remoteState.completedDays : [],
+          usedEnergizers: Array.isArray(remoteState.usedEnergizers) ? remoteState.usedEnergizers : [],
+          completedSteps: (remoteState.completedSteps && typeof remoteState.completedSteps === 'object') ? remoteState.completedSteps : {},
+          dayIntroSeen: (remoteState.dayIntroSeen && typeof remoteState.dayIntroSeen === 'object') ? remoteState.dayIntroSeen : {},
+        }));
+      } catch (err) {
+        console.error('[App] Error applying remote state:', err);
+      }
+      // Reset flag after React processes the update
+      setTimeout(() => {
+        isRemoteUpdateRef.current = false;
+        setIsRemoteUpdate(false);
+      }, 100);
+    });
+    return () => unsub();
+  }, [className]);
+
+  // F4: Firebase sync — save state to Firebase on changes
+  useEffect(() => {
+    if (!className) return;
+    if (isRemoteUpdateRef.current) return;
+    try {
+      saveClassState(className, state);
+    } catch (err) {
+      console.error('[App] Error saving to Firebase:', err);
+    }
+  }, [state, className]);
 
   // Pre-init audioManager on mount (async, no user gesture needed)
   useEffect(() => {
@@ -385,11 +439,56 @@ export default function App() {
     audioManager.stopCurrent();
   };
 
+  // F4: Class handlers
+  const handleClassSelected = (name) => {
+    // Reset to fresh default state first — Firebase subscription will overwrite
+    // if this class already has saved progress
+    const fresh = resetState();
+    setState(prev => ({ ...fresh, volume: prev.volume }));
+    setSelectedDay(null);
+    setViewingStepIndex(null);
+    setScreen('splash');
+    localStorage.setItem(CLASS_STORAGE_KEY, name);
+    setClassName(name);
+  };
+
+  const handleSwitchClass = () => {
+    localStorage.removeItem(CLASS_STORAGE_KEY);
+    setClassName(null);
+    setShowTeacherPanel(false);
+  };
+
+  const handleNewClass = () => {
+    localStorage.removeItem(CLASS_STORAGE_KEY);
+    const fresh = resetState();
+    setState(fresh);
+    setClassName(null);
+    setSelectedDay(null);
+    setViewingStepIndex(null);
+    setScreen('splash');
+    setShowTeacherPanel(false);
+  };
+
+  const handleResetClass = () => {
+    if (!className) return;
+    const fresh = resetState();
+    setState(fresh);
+    setSelectedDay(null);
+    setViewingStepIndex(null);
+    setScreen('splash');
+    setShowTeacherPanel(false);
+  };
+
   // Current computed values
   const dayData = getDayData();
   const activeStepIdx = dayData ? getActiveStepIndex(dayData.id) : 0;
   const completedDaysList = DAYS.filter(d => isDayCompleted(d.id)).map(d => d.id);
   const isIntroScreen = ['splash', 'wochenplan', 'projektregeln', 'ichStimmeZu', 'lernkarten'].includes(screen);
+
+  // F4: Show class setup if no class selected
+  if (!className) {
+    return <ClassSetupScreen onClassSelected={handleClassSelected} />;
+  }
 
   return (
     <div className="no-select" style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -404,6 +503,8 @@ export default function App() {
         onOpenTeacherPanel={() => setShowTeacherPanel(true)}
         onTitleClick={handleTitleClick}
         isIntro={isIntroScreen}
+        onOpenBoard={!isIntroScreen ? () => setShowQuickBoard(true) : undefined}
+        className={className}
       />
 
       {/* Screen content with fade transitions */}
@@ -482,6 +583,17 @@ export default function App() {
           onSkipDay={handleSkipDay}
           onResetIntro={handleResetIntro}
           onResetAll={handleResetAll}
+          className={className}
+          onSwitchClass={handleSwitchClass}
+          onNewClass={handleNewClass}
+          onResetClass={handleResetClass}
+        />
+      )}
+
+      {showQuickBoard && (
+        <QuickBoardDialog
+          onClose={() => setShowQuickBoard(false)}
+          dayColor={dayData?.color || '#FF6B35'}
         />
       )}
 
@@ -497,10 +609,10 @@ export default function App() {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0 24px',
-          background: 'rgba(255, 248, 240, 0.85)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          borderTop: '1px solid rgba(255, 166, 107, 0.2)',
+          background: 'rgba(255, 245, 235, 0.3)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          borderTop: '1px solid rgba(255, 166, 107, 0.12)',
           zIndex: 90,
           boxSizing: 'border-box',
         }}>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ref, set, remove, onValue } from 'firebase/database';
+import { ref, set, push, remove, onValue, get } from 'firebase/database';
 import { db } from '../firebase';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -40,6 +40,14 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [confirm, setConfirm] = useState(null);
   const createdRef = useRef(false);
+
+  // F3: Teacher input state
+  const [teacherTexts, setTeacherTexts] = useState({});
+
+  // F1: Saved boards state
+  const [savedBoards, setSavedBoards] = useState([]);
+  const [showSavedBoards, setShowSavedBoards] = useState(false);
+  const [viewingSavedBoard, setViewingSavedBoard] = useState(null);
 
   const cols = columns || DEFAULT_COLUMNS;
 
@@ -198,6 +206,76 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
     setTimeout(() => setCode(currentCode), 100);
   };
 
+  // F3: Teacher post handler
+  const handleTeacherPost = (colIndex) => {
+    const text = (teacherTexts[colIndex] || '').trim();
+    if (!text || !code) return;
+    const postsRef = ref(db, 'boards/' + code + '/posts');
+    push(postsRef, {
+      text,
+      author: '\u{1F31F} Lehrkraft',
+      column: colIndex,
+      color: '#B3E5FC',
+      timestamp: Date.now(),
+    }).catch((err) => {
+      console.error('[BoardCreator] Error posting teacher message:', err);
+    });
+    setTeacherTexts(prev => ({ ...prev, [colIndex]: '' }));
+  };
+
+  // F1: Load saved boards
+  useEffect(() => {
+    const savedRef = ref(db, 'savedBoards');
+    const unsub = onValue(savedRef, (snap) => {
+      const data = snap.val();
+      if (data) {
+        const list = Object.entries(data).map(([key, val]) => ({ ...val, _key: key }));
+        list.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+        setSavedBoards(list);
+      } else {
+        setSavedBoards([]);
+      }
+    }, (err) => {
+      console.error('[BoardCreator] Error loading saved boards:', err);
+    });
+    return () => unsub();
+  }, []);
+
+  // F1: Save board snapshot
+  const handleSaveBoard = () => {
+    if (!code) return;
+    const savedRef = ref(db, 'savedBoards');
+    push(savedRef, {
+      title: title || 'Fragen-Werkstatt',
+      columns: cols,
+      posts: posts.reduce((acc, p) => {
+        acc[p._key] = { text: p.text, author: p.author, column: p.column, color: p.color, timestamp: p.timestamp, likes: p.likes || null };
+        return acc;
+      }, {}),
+      savedAt: Date.now(),
+      boardCode: code,
+    }).then(() => {
+      console.log('[BoardCreator] Board saved successfully');
+    }).catch((err) => {
+      console.error('[BoardCreator] Error saving board:', err);
+    });
+  };
+
+  // F1: Delete saved board
+  const handleDeleteSavedBoard = (boardKey) => {
+    setConfirm({
+      message: 'Gespeichertes Board endg\u00fcltig l\u00f6schen?',
+      confirmLabel: 'L\u00f6schen',
+      danger: true,
+      action: () => {
+        remove(ref(db, 'savedBoards/' + boardKey)).catch((err) => {
+          console.error('[BoardCreator] Error deleting saved board:', err);
+        });
+        setConfirm(null);
+      },
+    });
+  };
+
   // Loading / Error state
   if (status !== 'ready') {
     return (
@@ -245,12 +323,45 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
         <div style={s.header}>
           <h1 style={{ ...s.title, color: dayColor }}>📋 Klassen-Board</h1>
           <div style={s.adminRow}>
-            <button onClick={handleRefresh} style={s.adminBtn} title="Aktualisieren">🔄</button>
+            <button onClick={handleRefresh} style={s.adminBtn} title="Aktualisieren">{'\u{1F504}'}</button>
+            <button onClick={handleSaveBoard} style={s.adminBtnGreen}>{'\u{1F4BE}'} Board speichern</button>
             <button onClick={handleClearPosts} style={s.adminBtnOrange}>Board leeren</button>
-            <button onClick={handleCloseBoard} style={s.adminBtnGrey}>Board schließen</button>
-            <button onClick={handleDeleteBoard} style={s.adminBtnRed}>Board löschen</button>
+            <button onClick={handleCloseBoard} style={s.adminBtnGrey}>Board schlie{'\u00df'}en</button>
+            <button onClick={handleDeleteBoard} style={s.adminBtnRed}>Board l{'\u00f6'}schen</button>
           </div>
         </div>
+
+        {/* F1: Saved Boards Section */}
+        {savedBoards.length > 0 && (
+          <div style={s.savedSection}>
+            <button
+              onClick={() => setShowSavedBoards(!showSavedBoards)}
+              style={s.savedToggle}
+            >
+              {'\u{1F4C1}'} Gespeicherte Boards ({savedBoards.length}) {showSavedBoards ? '\u25B2' : '\u25BC'}
+            </button>
+            {showSavedBoards && (
+              <div style={s.savedList}>
+                {savedBoards.map((sb) => {
+                  const postCount = sb.posts ? Object.keys(sb.posts).length : 0;
+                  const date = sb.savedAt ? new Date(sb.savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+                  return (
+                    <div key={sb._key} style={s.savedItem}>
+                      <div style={s.savedInfo}>
+                        <div style={s.savedTitle}>{sb.title}</div>
+                        <div style={s.savedMeta}>{date} &middot; {postCount} Beitr{'\u00e4'}ge</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => setViewingSavedBoard(sb)} style={s.savedBtnView}>Anzeigen</button>
+                        <button onClick={() => handleDeleteSavedBoard(sb._key)} style={s.savedBtnDelete}>L{'\u00f6'}schen</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* QR + Info */}
         <div style={s.qrRow}>
@@ -308,8 +419,26 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
                       );
                     })}
                     {colPosts.length === 0 && (
-                      <div style={s.emptyCol}>Noch keine Beiträge</div>
+                      <div style={s.emptyCol}>Noch keine Beitr{'\u00e4'}ge</div>
                     )}
+                  </div>
+                  {/* F3: Teacher input */}
+                  <div style={s.teacherInput}>
+                    <input
+                      type="text"
+                      value={teacherTexts[ci] || ''}
+                      onChange={(e) => setTeacherTexts(prev => ({ ...prev, [ci]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleTeacherPost(ci); }}
+                      placeholder="Nachricht..."
+                      style={s.teacherInputField}
+                    />
+                    <button
+                      onClick={() => handleTeacherPost(ci)}
+                      style={{ ...s.teacherSendBtn, background: dayColor || '#FF6B35' }}
+                      disabled={!(teacherTexts[ci] || '').trim()}
+                    >
+                      Senden
+                    </button>
                   </div>
                 </div>
               );
@@ -317,6 +446,43 @@ export default function BoardCreator({ title, columns, dayColor, onClose }) {
           </div>
         </div>
       </div>
+
+      {/* F1: Read-only saved board overlay */}
+      {viewingSavedBoard && (
+        <div style={s.savedOverlay}>
+          <div style={s.savedOverlayCard}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ ...s.title, color: dayColor, margin: 0 }}>{'\u{1F4CB}'} {viewingSavedBoard.title}</h2>
+              <button onClick={() => setViewingSavedBoard(null)} style={s.adminBtnGrey}>Schlie{'\u00df'}en</button>
+            </div>
+            <div style={s.colContainer}>
+              {(viewingSavedBoard.columns || []).map((colName, ci) => {
+                const sbPosts = viewingSavedBoard.posts
+                  ? Object.entries(viewingSavedBoard.posts)
+                      .filter(([, p]) => p.column === ci)
+                      .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0))
+                  : [];
+                return (
+                  <div key={ci} style={s.column}>
+                    <div style={{ ...s.colHeader, color: dayColor }}>{colName}</div>
+                    <div style={s.colPosts}>
+                      {sbPosts.map(([key, p]) => (
+                        <div key={key} style={{ ...s.stickyNote, background: p.color || '#FFE0B2' }}>
+                          <div style={s.noteAuthor}>{p.author}</div>
+                          <div style={s.noteText}>{p.text}</div>
+                        </div>
+                      ))}
+                      {sbPosts.length === 0 && (
+                        <div style={s.emptyCol}>Keine Beitr{'\u00e4'}ge</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -522,20 +688,23 @@ const s = {
   boardArea: {
     flex: 1,
     minHeight: 0,
-    overflow: 'auto',
+    overflowX: 'auto',
+    overflowY: 'auto',
     WebkitOverflowScrolling: 'touch',
   },
   colContainer: {
     display: 'flex',
-    gap: 14,
+    gap: 12,
     minHeight: 200,
+    minWidth: 'min-content',
   },
   column: {
     flex: '1 1 0',
-    minWidth: 200,
+    minWidth: 160,
+    maxWidth: 300,
     background: 'rgba(255,255,255,0.7)',
     borderRadius: 16,
-    padding: 12,
+    padding: 10,
     boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
   },
   colHeader: {
@@ -601,6 +770,137 @@ const s = {
     textAlign: 'center',
     padding: '16px 8px',
     fontStyle: 'italic',
+  },
+  // F1: Save button (green)
+  adminBtnGreen: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 14,
+    fontWeight: 600,
+    padding: '8px 14px',
+    background: '#4CAF50',
+    color: 'white',
+    border: 'none',
+    borderRadius: 10,
+    cursor: 'pointer',
+  },
+  // F1: Saved boards section
+  savedSection: {
+    background: 'white',
+    borderRadius: 16,
+    padding: '12px 16px',
+    boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+  },
+  savedToggle: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 15,
+    fontWeight: 600,
+    color: '#555',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '4px 0',
+    width: '100%',
+    textAlign: 'left',
+  },
+  savedList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    marginTop: 10,
+  },
+  savedItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '8px 12px',
+    background: '#F8F8F8',
+    borderRadius: 10,
+  },
+  savedInfo: { flex: 1 },
+  savedTitle: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 15,
+    fontWeight: 600,
+    color: '#333',
+  },
+  savedMeta: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 12,
+    color: '#999',
+    fontWeight: 500,
+  },
+  savedBtnView: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '6px 12px',
+    background: '#E3F2FD',
+    color: '#1976D2',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
+  },
+  savedBtnDelete: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '6px 12px',
+    background: '#FFEBEE',
+    color: '#C62828',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
+  },
+  // F1: Saved board overlay
+  savedOverlay: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 2500,
+    background: 'rgba(255, 250, 245, 0.97)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    overflowY: 'auto',
+  },
+  savedOverlayCard: {
+    width: '100%',
+    maxWidth: 1200,
+    maxHeight: '90vh',
+    overflowX: 'auto',
+    overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch',
+  },
+  // F3: Teacher input styles
+  teacherInput: {
+    display: 'flex',
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTop: '1px solid rgba(0,0,0,0.06)',
+  },
+  teacherInputField: {
+    flex: 1,
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 14,
+    fontWeight: 500,
+    padding: '6px 10px',
+    border: '1px solid rgba(0,0,0,0.12)',
+    borderRadius: 8,
+    outline: 'none',
+    background: '#FAFAFA',
+  },
+  teacherSendBtn: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '6px 12px',
+    color: 'white',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
   },
   // Confirm dialog
   confirmOverlay: {

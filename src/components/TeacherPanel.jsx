@@ -16,6 +16,10 @@ export default function TeacherPanel({
   onFillEnergy,
   onResetIntro,
   onResetAll,
+  className: klassenName,
+  onSwitchClass,
+  onNewClass,
+  onResetClass,
 }) {
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -127,6 +131,36 @@ export default function TeacherPanel({
               : '\u{1F5D1}\uFE0F Alles zur\u00fccksetzen'}
           </button>
         </div>
+
+        {/* Class section */}
+        {klassenName && (
+          <>
+            <div style={styles.sectionHeader}>Klasse</div>
+            <div style={styles.stateBox}>
+              <div style={styles.stateRow}>
+                <span style={styles.stateLabel}>Aktive Klasse:</span>
+                <span style={styles.stateValue}>{klassenName}</span>
+              </div>
+            </div>
+            <div style={styles.actions}>
+              {onSwitchClass && (
+                <button style={styles.actionButton} onClick={() => handleButton(onSwitchClass)}>
+                  {'\u{1F504}'} Klasse wechseln
+                </button>
+              )}
+              {onNewClass && (
+                <button style={styles.actionButton} onClick={() => handleButton(onNewClass)}>
+                  {'\u2795'} Neue Klasse
+                </button>
+              )}
+              {onResetClass && (
+                <button style={{ ...styles.actionButton, ...styles.dangerButtonIdle }} onClick={() => handleButton(onResetClass)}>
+                  {'\u26A0\uFE0F'} Klasse zur{'\u00fc'}cksetzen
+                </button>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Close */}
         <button style={styles.closeButton} onClick={() => handleButton(onClose)}>

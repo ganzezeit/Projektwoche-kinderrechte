@@ -7,3 +7,4 @@ export const STORAGE_KEY = 'weltverbinder-save-v2';
 export const CHARACTER_EMOJI = '\u{1F9D1}\u200D\u{1F680}';
 export const TEACHER_PANEL_CLICKS = 3;
 export const TEACHER_PANEL_TIMEOUT = 800;
+export const CLASS_STORAGE_KEY = 'weltverbinder-class';

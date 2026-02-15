@@ -51,19 +51,23 @@ export default function BoardPage({ code }) {
   const [noteText, setNoteText] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Override global overflow:hidden on html/body/#root so the board page scrolls
+  // Override global overflow:hidden on html/body/#root so the board page scrolls on mobile
   useEffect(() => {
-    const els = [document.documentElement, document.body, document.getElementById('root')];
-    const saved = els.map(el => el ? el.style.cssText : '');
-    els.forEach(el => {
-      if (!el) return;
-      el.style.overflow = 'auto';
-      el.style.height = 'auto';
-      el.style.position = 'static';
-    });
-    return () => {
-      els.forEach((el, i) => { if (el) el.style.cssText = saved[i]; });
-    };
+    // Inject a <style> tag that overrides global.css with !important
+    const style = document.createElement('style');
+    style.id = 'board-scroll-fix';
+    style.textContent = `
+      html, body, #root {
+        overflow: auto !important;
+        height: auto !important;
+        min-height: 100vh !important;
+        position: static !important;
+        -webkit-overflow-scrolling: touch !important;
+        overscroll-behavior: auto !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => { style.remove(); };
   }, []);
 
   useEffect(() => {

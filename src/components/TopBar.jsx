@@ -113,7 +113,7 @@ function PngButton({ src, alt, size, onClick, title }) {
   );
 }
 
-export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId, dayColor, onOpenTeacherPanel, onTitleClick, isIntro }) {
+export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId, dayColor, onOpenTeacherPanel, onTitleClick, isIntro, onOpenBoard, className: klassenName }) {
   const clickCountRef = useRef(0);
   const clickTimerRef = useRef(null);
   const [muted, setMuted] = useState(false);
@@ -225,8 +225,20 @@ export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId,
         ) : null}
       </div>
 
-      {/* Right: Energy + Skip + Sound + Volume */}
+      {/* Right: Class name + Board + Energy + Skip + Sound + Volume */}
       <div style={styles.right}>
+        {klassenName && (
+          <span style={styles.className}>Klasse {klassenName}</span>
+        )}
+        {onOpenBoard && (
+          <PngButton
+            src="/images/ui/button-board.png"
+            alt={'\u{1F4CB}'}
+            size={30}
+            onClick={onOpenBoard}
+            title="Klassen-Board"
+          />
+        )}
         <EnergyBar energy={energy} />
         <PngButton
           src="/images/ui/button-skip.png"
@@ -261,11 +273,11 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '0 20px',
-    background: 'linear-gradient(180deg, rgba(255, 248, 240, 0.95) 0%, rgba(255, 243, 230, 0.9) 100%)',
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
-    borderBottom: '2px solid rgba(255, 166, 107, 0.3)',
-    boxShadow: '0 2px 12px rgba(139, 90, 43, 0.08)',
+    background: 'rgba(255, 245, 235, 0.35)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    borderBottom: '1px solid rgba(255, 166, 107, 0.15)',
+    boxShadow: '0 1px 8px rgba(139, 90, 43, 0.06)',
     zIndex: 100,
     boxSizing: 'border-box',
   },
@@ -323,5 +335,16 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: 6,
+  },
+  className: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 14,
+    fontWeight: 700,
+    color: '#FF6B35',
+    whiteSpace: 'nowrap',
+    background: 'rgba(255, 107, 53, 0.1)',
+    padding: '3px 10px',
+    borderRadius: 10,
+    border: '1.5px solid rgba(255, 107, 53, 0.25)',
   },
 };
