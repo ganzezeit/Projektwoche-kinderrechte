@@ -248,6 +248,16 @@ export default function VideoRoomManager({ roomCode, color }) {
                           {'\u{1F534}'} Stoppen
                         </button>
                       )}
+                      <button
+                        onClick={() => {
+                          const rn = `projektwoche-${roomCode}-${room.id}`;
+                          window.open(`https://jitsi.modular.im/${rn}#config.prejoinPageEnabled=false&config.disableDeepLinking=true&userInfo.displayName=Lehrer`, '_blank');
+                          setMenuOpen(null);
+                        }}
+                        style={vs.menuItem}
+                      >
+                        {'\u{1F440}'} Vorschau
+                      </button>
                       <button onClick={() => handleRoomAction(room.id, 'delete')} style={{ ...vs.menuItem, color: '#C62828' }}>
                         {'\u{1F5D1}\uFE0F'} Raum löschen
                       </button>

@@ -17,6 +17,13 @@ const LANG_COLORS = {
 const TRANSLATE_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/translate';
 const STORAGE_PREFIX = 'chat-user-';
 
+const JITSI_SERVERS = [
+  'jitsi.modular.im',
+  'meet.element.io',
+  'jitsi.member.fsf.org',
+  'meet.jit.si',
+];
+
 // Detect device language for UI labels
 const DEVICE_LANG = (() => {
   const raw = (navigator.language || navigator.languages?.[0] || 'en').slice(0, 2).toLowerCase();
@@ -117,6 +124,11 @@ export default function ChatPage({ roomCode }) {
   // Video room / waiting room state
   const [videoRoom, setVideoRoom] = useState(null);
   const [assignedCount, setAssignedCount] = useState(0);
+
+  // Jitsi video state
+  const [jitsiServerIdx, setJitsiServerIdx] = useState(0);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const iframeLoadedRef = useRef(false);
 
   // Override global overflow + inject animations
   useEffect(() => {
@@ -276,6 +288,52 @@ export default function ChatPage({ roomCode }) {
     const keys = new Set(videoRoom.participants.map(p => p.name + '|' + p.lang));
     return messages.filter(m => keys.has(m.author + '|' + m.authorLang));
   }, [messages, videoRoom]);
+
+  // Jitsi video URL — simple iframe, no external API
+  const jitsiUrl = useMemo(() => {
+    if (!videoRoom || videoRoom.status !== 'active') return null;
+    if (videoFailed || jitsiServerIdx >= JITSI_SERVERS.length) return null;
+    const server = JITSI_SERVERS[jitsiServerIdx];
+    const roomName = `projektwoche-${roomCode}-${videoRoom.id}`;
+    const hash = [
+      'config.startWithAudioMuted=true',
+      'config.startWithVideoMuted=false',
+      'config.prejoinPageEnabled=false',
+      'config.disableDeepLinking=true',
+      'interfaceConfig.TOOLBAR_BUTTONS=["camera","microphone","hangup","tileview"]',
+      'interfaceConfig.MOBILE_APP_PROMO=false',
+      'interfaceConfig.DISABLE_JOIN_LEAVE_NOTIFICATIONS=true',
+      'interfaceConfig.SHOW_JITSI_WATERMARK=false',
+      'interfaceConfig.SHOW_BRAND_WATERMARK=false',
+      `userInfo.displayName=${encodeURIComponent(userName)}`,
+    ].join('&');
+    return `https://${server}/${roomName}#${hash}`;
+  }, [videoRoom, roomCode, userName, jitsiServerIdx, videoFailed]);
+
+  // Fallback: try next server if iframe doesn't load within 10s
+  useEffect(() => {
+    if (!jitsiUrl) return;
+    iframeLoadedRef.current = false;
+    const timer = setTimeout(() => {
+      if (!iframeLoadedRef.current) {
+        setJitsiServerIdx(prev => {
+          const next = prev + 1;
+          if (next >= JITSI_SERVERS.length) { setVideoFailed(true); return prev; }
+          return next;
+        });
+      }
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [jitsiUrl]);
+
+  // Reset when video room changes or stops
+  useEffect(() => {
+    setJitsiServerIdx(0);
+    setVideoFailed(false);
+    iframeLoadedRef.current = false;
+  }, [videoRoom?.id, videoRoom?.status]);
+
+  const handleIframeLoad = useCallback(() => { iframeLoadedRef.current = true; }, []);
 
   // Trigger translations for visible messages only
   useEffect(() => {
@@ -451,6 +509,27 @@ export default function ChatPage({ roomCode }) {
           {'\u{1F7E2}'} {videoRoom.participants.length} {t.participants}
         </div>
       </div>
+
+      {/* Jitsi video — shown when room is active */}
+      {videoRoom.status === 'active' && (
+        <div style={s.videoSection}>
+          {jitsiUrl ? (
+            <iframe
+              key={jitsiUrl}
+              src={jitsiUrl}
+              onLoad={handleIframeLoad}
+              allow="camera;microphone;display-capture"
+              allowFullScreen
+              style={s.videoIframe}
+            />
+          ) : videoFailed ? (
+            <div style={s.videoOverlay}>
+              <div style={{ fontSize: 32 }}>{'\u26A0\uFE0F'}</div>
+              <div style={s.videoLoadText}>Video nicht verf\u00FCgbar. Bitte nutze den Chat.</div>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Messages */}
       <div style={s.messagesArea}>
@@ -739,6 +818,40 @@ const s = {
     borderRadius: 16,
     flexShrink: 0,
     whiteSpace: 'nowrap',
+  },
+  // Jitsi video
+  videoSection: {
+    flexShrink: 0,
+    height: '40vh',
+    background: '#1a1a1a',
+    overflow: 'hidden',
+    borderRadius: '0 0 12px 12px',
+    margin: '0 8px',
+    position: 'relative',
+  },
+  videoIframe: {
+    width: '100%',
+    height: '100%',
+    border: 'none',
+    borderRadius: 12,
+  },
+  videoOverlay: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    background: '#1a1a1a',
+  },
+  videoLoadText: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 16,
+    fontWeight: 600,
+    color: '#999',
+    textAlign: 'center',
+    padding: '0 20px',
   },
   // Messages
   messagesArea: {
