@@ -142,7 +142,7 @@ function SaveIndicator({ status }) {
   );
 }
 
-export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId, dayColor, onOpenTeacherPanel, onTitleClick, isIntro, onOpenBoard, className: klassenName, saveStatus }) {
+export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId, dayColor, onOpenTeacherPanel, onTitleClick, isIntro, onOpenBoard, onOpenQuiz, onLightningClick, className: klassenName, saveStatus }) {
   const clickCountRef = useRef(0);
   const clickTimerRef = useRef(null);
   const [muted, setMuted] = useState(false);
@@ -214,15 +214,17 @@ export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId,
           title="Lehrermenü"
         />
         <div style={styles.titleArea} onClick={handleTitleClick}>
-          <img
-            src="/images/ui/title-projektwoche-kinderrechte.png"
-            alt="Projektwoche: Kinderrechte"
-            style={{ height: 55, width: 'auto', objectFit: 'contain' }}
-            onError={(e) => {
-              e.target.style.display = 'none';
-              e.target.nextSibling.style.display = 'flex';
-            }}
-          />
+          <div style={styles.titleBacking}>
+            <img
+              src="/images/ui/title-projektwoche-kinderrechte.png"
+              alt="Projektwoche: Kinderrechte"
+              style={{ height: 55, width: 'auto', objectFit: 'contain' }}
+              onError={(e) => {
+                e.target.style.display = 'none';
+                e.target.parentNode.nextSibling.style.display = 'flex';
+              }}
+            />
+          </div>
           <div style={{ display: 'none', alignItems: 'center', gap: 8 }}>
             <span style={styles.globe}>{'\u{1F30D}'}</span>
             <span style={styles.title}>Projektwoche: Kinderrechte</span>
@@ -230,29 +232,8 @@ export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId,
         </div>
       </div>
 
-      {/* Center: Day title PNG when viewing a day */}
-      <div style={styles.center}>
-        {dayId ? (
-          <>
-            <img
-              src={`/images/ui/title-tag${dayId}.png`}
-              alt={dayName || `Tag ${dayId}`}
-              style={{ height: 50, width: 'auto', objectFit: 'contain' }}
-              onError={(e) => {
-                e.target.style.display = 'none';
-                e.target.nextSibling.style.display = 'inline';
-              }}
-            />
-            <span style={{ display: 'none', ...styles.dayName, color: 'white', textShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
-              {dayName}
-            </span>
-          </>
-        ) : dayName ? (
-          <span style={{ ...styles.dayName, color: 'white', textShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
-            {dayName}
-          </span>
-        ) : null}
-      </div>
+      {/* Center: intentionally empty — day titles shown in day content area */}
+      <div style={styles.center} />
 
       {/* Right: Class name + Board + Energy + Skip + Sound + Volume */}
       <div style={styles.right}>
@@ -268,7 +249,16 @@ export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId,
             title="Klassen-Board"
           />
         )}
-        <EnergyBar energy={energy} />
+        {onOpenQuiz && (
+          <PngButton
+            src="/images/ui/button-quiz.png"
+            alt={'\u2753'}
+            size={30}
+            onClick={onOpenQuiz}
+            title="Quiz"
+          />
+        )}
+        <EnergyBar energy={energy} onLightningClick={onLightningClick} />
         {saveStatus && <SaveIndicator status={saveStatus} />}
         <PngButton
           src="/images/ui/button-skip.png"
@@ -337,6 +327,14 @@ const styles = {
     gap: 8,
     cursor: 'pointer',
     userSelect: 'none',
+  },
+  titleBacking: {
+    background: 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 6,
+    padding: '2px 6px',
+    boxShadow: '0 1px 4px rgba(139, 90, 43, 0.08)',
+    display: 'flex',
+    alignItems: 'center',
   },
   globe: {
     fontSize: 26,

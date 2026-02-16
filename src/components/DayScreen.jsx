@@ -109,23 +109,23 @@ export default function DayScreen({ day, activeStepIndex, completedSteps, onStep
           >
             {'\u2190'} Karte
           </button>
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.75)',
-            padding: '6px 14px',
-            borderRadius: 12,
-          }}>
+        </div>
+
+        {/* Day title — large and prominent */}
+        <div style={styles.dayTitleArea}>
+          <div style={styles.dayTitleBadge}>
             <h1 style={styles.dayTitle}>
               <img
                 src={`/images/ui/title-tag${day.id}.png`}
                 alt={`Tag ${day.id}`}
                 loading="lazy"
-                style={{ height: 70, width: 'auto', verticalAlign: 'middle' }}
+                style={{ height: 80, width: 'auto', verticalAlign: 'middle' }}
                 onError={(e) => {
                   e.target.style.display = 'none';
                   e.target.nextSibling.style.display = 'inline';
                 }}
               />
-              <span style={{ display: 'none' }}>{day.emoji} {day.name}</span>
+              <span style={{ display: 'none', fontFamily: "'Lilita One', cursive", fontSize: 36, color: '#8B5A2B' }}>{day.emoji} {day.name}</span>
             </h1>
             <p style={styles.daySub}><GlossaryTooltip text={day.sub} /></p>
           </div>
@@ -327,6 +327,21 @@ const styles = {
     alignItems: 'center',
     gap: 16,
     flexShrink: 0,
+  },
+  dayTitleArea: {
+    display: 'flex',
+    justifyContent: 'center',
+    padding: '4px 28px 0',
+    flexShrink: 0,
+  },
+  dayTitleBadge: {
+    background: 'rgba(255, 255, 255, 0.8)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    padding: '8px 24px',
+    borderRadius: 16,
+    boxShadow: '0 2px 12px rgba(139, 90, 43, 0.1)',
+    textAlign: 'center',
   },
   backBtn: {
     fontFamily: "'Fredoka', sans-serif",

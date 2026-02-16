@@ -38,6 +38,33 @@ export function compressImage(file) {
 }
 
 /**
+ * Upload a compressed quiz question image to Firebase Storage.
+ * Path: quizImages/{uniqueId}.jpg
+ * Returns { downloadURL } on success.
+ */
+export function uploadQuizImage(blob, onProgress) {
+  const uniqueId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  return new Promise((resolve, reject) => {
+    try {
+      const storageRef = ref(storage, `quizImages/${uniqueId}.jpg`);
+      const task = uploadBytesResumable(storageRef, blob, { contentType: 'image/jpeg' });
+      task.on('state_changed',
+        (snapshot) => {
+          const percent = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          if (onProgress) onProgress(percent);
+        },
+        (error) => { reject(error); },
+        () => {
+          getDownloadURL(task.snapshot.ref)
+            .then((downloadURL) => resolve({ downloadURL }))
+            .catch(reject);
+        }
+      );
+    } catch (error) { reject(error); }
+  });
+}
+
+/**
  * Upload a compressed image to Firebase Storage.
  * Path: boards/{boardCode}/{postId}.jpg
  * Returns { downloadURL } on success.

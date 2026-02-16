@@ -3,22 +3,28 @@ import React, { useState } from 'react';
 const BAR_WIDTH = 200;
 const BAR_HEIGHT = 30;
 
-export default function EnergyBar({ energy, maxEnergy = 100 }) {
+export default function EnergyBar({ energy, maxEnergy = 100, onLightningClick }) {
   const percentage = Math.round(Math.max(0, Math.min(100, (energy / maxEnergy) * 100)));
   const [iconOk, setIconOk] = useState(true);
 
   return (
     <div style={styles.wrapper}>
-      {iconOk ? (
-        <img
-          src="/images/ui/icon-energy.png"
-          alt={'\u26A1'}
-          style={{ width: 40, height: 40, objectFit: 'contain' }}
-          onError={() => setIconOk(false)}
-        />
-      ) : (
-        <span style={styles.emoji}>{'\u26A1'}</span>
-      )}
+      <button
+        onClick={onLightningClick}
+        style={styles.lightningBtn}
+        title="Energizer-Pause!"
+      >
+        {iconOk ? (
+          <img
+            src="/images/ui/icon-energy.png"
+            alt={'\u26A1'}
+            style={{ width: 40, height: 40, objectFit: 'contain' }}
+            onError={() => setIconOk(false)}
+          />
+        ) : (
+          <span style={styles.emoji}>{'\u26A1'}</span>
+        )}
+      </button>
       <div style={styles.bar}>
         <div style={{
           position: 'absolute',
@@ -42,6 +48,16 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: 4,
+  },
+  lightningBtn: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'transform 0.2s ease',
   },
   emoji: {
     fontSize: 16,

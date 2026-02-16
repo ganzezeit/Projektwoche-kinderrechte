@@ -5,10 +5,10 @@ import { playClickSound, playSuccessSound } from '../utils/audio';
 import { ENERGIZER_RESTORE_MIN, ENERGIZER_RESTORE_MAX } from '../utils/constants';
 import GlossaryTooltip from './GlossaryTooltip';
 
-export default function EnergizerScreen({ usedEnergizers, dayColor, onComplete }) {
-  const [phase, setPhase] = useState('pick');
-  const [selected, setSelected] = useState(null);
-  const [timeLeft, setTimeLeft] = useState(0);
+export default function EnergizerScreen({ usedEnergizers, dayColor, onComplete, preSelected }) {
+  const [phase, setPhase] = useState(() => preSelected ? 'active' : 'pick');
+  const [selected, setSelected] = useState(preSelected || null);
+  const [timeLeft, setTimeLeft] = useState(() => preSelected ? preSelected.duration : 0);
   const [running, setRunning] = useState(false);
   const intervalRef = useRef(null);
 

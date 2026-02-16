@@ -175,3 +175,33 @@ button:focus-visible {
     object-fit: contain !important;
   }
 }
+
+/* ====== Print stylesheet for Quiz Analysis ====== */
+@media print {
+  .quiz-analysis-overlay {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    background: white !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .quiz-analysis-overlay .no-print { display: none !important; }
+  .quiz-analysis-content { overflow: visible !important; max-height: none !important; }
+}
+
+/* ====== Print stylesheet for Weekly Report ====== */
+@media print {
+  .weekly-report-overlay {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    background: white !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .weekly-report-overlay .no-print { display: none !important; }
+  .weekly-report-content { overflow: visible !important; max-height: none !important; }
+  .report-page-break { page-break-before: always; break-before: page; }
+  .report-section { break-inside: avoid; page-break-inside: avoid; }
+}

@@ -204,3 +204,37 @@ export function deleteClass(className) {
 export function sanitizeClassName(name) {
   return name.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 30);
 }
+
+/**
+ * Save task timing (startedAt or completedAt) for a step.
+ * field = 'startedAt' | 'completedAt'
+ * startedAt is only written if not already set (no overwrite).
+ */
+export async function saveTaskTiming(className, stepId, field) {
+  if (!className || !stepId) return;
+  try {
+    const timingRef = ref(db, 'classes/' + className + '/taskTimings/' + stepId + '/' + field);
+    if (field === 'startedAt') {
+      const snap = await get(timingRef);
+      if (snap.val()) return; // already set
+    }
+    await set(timingRef, Date.now());
+  } catch (err) {
+    console.error('[firebasePersistence] Error saving task timing:', err);
+  }
+}
+
+/**
+ * Get all task timings for a class.
+ * Returns { [stepId]: { startedAt?, completedAt? } }
+ */
+export async function getTaskTimings(className) {
+  if (!className) return {};
+  try {
+    const snap = await get(ref(db, 'classes/' + className + '/taskTimings'));
+    return snap.val() || {};
+  } catch (err) {
+    console.error('[firebasePersistence] Error getting task timings:', err);
+    return {};
+  }
+}

@@ -29,6 +29,7 @@ export default function TeacherPanel({
   onResetClass,
   onForceSave,
   lastSaveTimestamp,
+  onOpenWeeklyReport,
 }) {
   const [confirmReset, setConfirmReset] = useState(false);
   const [localSaveStatus, setLocalSaveStatus] = useState('idle');
@@ -213,6 +214,21 @@ export default function TeacherPanel({
                   {'\u26A0\uFE0F'} Klasse zurücksetzen
                 </button>
               )}
+            </div>
+          </>
+        )}
+
+        {/* Weekly Report */}
+        {klassenName && onOpenWeeklyReport && (
+          <>
+            <div style={styles.sectionHeader}>Bericht</div>
+            <div style={styles.actions}>
+              <button
+                style={{ ...styles.actionButton, background: '#E3F2FD', color: '#1565C0' }}
+                onClick={() => handleButton(onOpenWeeklyReport)}
+              >
+                {'\u{1F4CB}'} Wochenbericht erstellen
+              </button>
             </div>
           </>
         )}

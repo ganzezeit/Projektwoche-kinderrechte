@@ -24,6 +24,9 @@ const StepViewer = lazy(() => import('./StepViewer'));
 const EnergizerScreen = lazy(() => import('./EnergizerScreen'));
 const TeacherPanel = lazy(() => import('./TeacherPanel'));
 const QuickBoardDialog = lazy(() => import('./QuickBoardDialog'));
+const QuizDialog = lazy(() => import('./QuizDialog'));
+const WeeklyReport = lazy(() => import('./WeeklyReport'));
+const EnergizerPopup = lazy(() => import('./EnergizerPopup'));
 
 /*
   Screen flow:
@@ -44,6 +47,12 @@ export default function App() {
   const [pendingStepAfterEnergizer, setPendingStepAfterEnergizer] = useState(null);
   const [energyFloat, setEnergyFloat] = useState(null);
   const [showQuickBoard, setShowQuickBoard] = useState(false);
+  const [showQuiz, setShowQuiz] = useState(false);
+  const [showWeeklyReport, setShowWeeklyReport] = useState(false);
+  const [showEnergizerPopup, setShowEnergizerPopup] = useState(false);
+  const [freeEnergizer, setFreeEnergizer] = useState(false);
+  const [freeEnergizerData, setFreeEnergizerData] = useState(null);
+  const screenBeforeFreeEnergizer = useRef(null);
 
   // F4: Class system
   const [className, setClassName] = useState(() => {
@@ -284,6 +293,12 @@ export default function App() {
 
     setViewingStepIndex(stepIndex);
     transitionTo('step', 'transition-enter');
+    // Track task start timing
+    if (className) {
+      import('../utils/firebasePersistence').then(({ saveTaskTiming }) => {
+        saveTaskTiming(className, step.id, 'startedAt');
+      }).catch(() => {});
+    }
   };
 
   const handleStepComplete = () => {
@@ -310,6 +325,12 @@ export default function App() {
     }
 
     setState(newState);
+    // Track task completion timing
+    if (className) {
+      import('../utils/firebasePersistence').then(({ saveTaskTiming }) => {
+        saveTaskTiming(className, step.id, 'completedAt');
+      }).catch(() => {});
+    }
     setViewingStepIndex(null);
     transitionTo('day');
   };
@@ -321,6 +342,16 @@ export default function App() {
   };
 
   const handleEnergizerComplete = (energizer) => {
+    // Free energizer: no state changes, return to previous screen
+    if (freeEnergizer) {
+      setFreeEnergizer(false);
+      setFreeEnergizerData(null);
+      const returnScreen = screenBeforeFreeEnergizer.current || 'map';
+      screenBeforeFreeEnergizer.current = null;
+      transitionTo(returnScreen);
+      return;
+    }
+
     const reward = energizer.energyReward;
 
     setEnergyFloat(`+${reward} Energie!`);
@@ -363,6 +394,20 @@ export default function App() {
     setSelectedDay(null);
     setViewingStepIndex(null);
     transitionTo('map', 'transition-back');
+  };
+
+  // -- Free energizer flow --
+  const handleLightningClick = () => {
+    playClickSound();
+    setShowEnergizerPopup(true);
+  };
+
+  const handleFreeEnergizerSelect = (energizer) => {
+    setShowEnergizerPopup(false);
+    screenBeforeFreeEnergizer.current = screen;
+    setFreeEnergizer(true);
+    setFreeEnergizerData(energizer);
+    transitionTo('energizer');
   };
 
   const handleVolumeChange = (vol) => {
@@ -542,13 +587,15 @@ export default function App() {
         energy={state.energy}
         volume={state.volume}
         onVolumeChange={handleVolumeChange}
-        dayName={dayData && !isIntroScreen && screen !== 'map' ? `${dayData.emoji} ${dayData.name}` : null}
-        dayId={dayData && !isIntroScreen && screen !== 'map' ? dayData.id : null}
+        dayName={null}
+        dayId={null}
         dayColor={dayData?.color}
         onOpenTeacherPanel={() => setShowTeacherPanel(true)}
         onTitleClick={handleTitleClick}
         isIntro={isIntroScreen}
         onOpenBoard={!isIntroScreen ? () => setShowQuickBoard(true) : undefined}
+        onOpenQuiz={!isIntroScreen ? () => setShowQuiz(true) : undefined}
+        onLightningClick={!isIntroScreen ? handleLightningClick : undefined}
         className={className}
         saveStatus={className ? saveStatus : null}
       />
@@ -612,6 +659,7 @@ export default function App() {
               usedEnergizers={state.usedEnergizers}
               dayColor={dayData?.color || '#FF6B35'}
               onComplete={handleEnergizerComplete}
+              preSelected={freeEnergizerData}
             />
           )}
         </Suspense>
@@ -639,6 +687,7 @@ export default function App() {
           onResetClass={handleResetClass}
           onForceSave={handleForceSave}
           lastSaveTimestamp={lastSaveTimestamp}
+          onOpenWeeklyReport={() => { setShowWeeklyReport(true); setShowTeacherPanel(false); }}
         />
         </Suspense>
       )}
@@ -648,6 +697,34 @@ export default function App() {
           <QuickBoardDialog
             onClose={() => setShowQuickBoard(false)}
             dayColor={dayData?.color || '#FF6B35'}
+          />
+        </Suspense>
+      )}
+
+      {showQuiz && (
+        <Suspense fallback={null}>
+          <QuizDialog
+            onClose={() => setShowQuiz(false)}
+            dayColor={dayData?.color || '#FF6B35'}
+            className={className}
+          />
+        </Suspense>
+      )}
+
+      {showEnergizerPopup && (
+        <Suspense fallback={null}>
+          <EnergizerPopup
+            onSelect={handleFreeEnergizerSelect}
+            onClose={() => setShowEnergizerPopup(false)}
+          />
+        </Suspense>
+      )}
+
+      {showWeeklyReport && (
+        <Suspense fallback={null}>
+          <WeeklyReport
+            className={className}
+            onClose={() => setShowWeeklyReport(false)}
           />
         </Suspense>
       )}
@@ -662,12 +739,13 @@ export default function App() {
           height: 48,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          justifyContent: 'center',
+          gap: 32,
           padding: '0 24px',
-          background: 'rgba(255, 245, 235, 0.3)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          borderTop: '1px solid rgba(255, 166, 107, 0.12)',
+          background: screen === 'map' ? 'rgba(255, 245, 235, 0.3)' : 'transparent',
+          backdropFilter: screen === 'map' ? 'blur(12px)' : 'none',
+          WebkitBackdropFilter: screen === 'map' ? 'blur(12px)' : 'none',
+          borderTop: screen === 'map' ? '1px solid rgba(255, 166, 107, 0.12)' : 'none',
           zIndex: 90,
           boxSizing: 'border-box',
         }}>
