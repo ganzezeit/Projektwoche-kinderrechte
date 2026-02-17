@@ -1,18 +1,15 @@
-// Map user style labels to Recraft V3 style values
-const RECRAFT_STYLE_MAP = {
-  'Illustration': 'digital_illustration',
-  'Foto': 'realistic_image',
-  'Cartoon': 'digital_illustration/2d_art_poster',
-  'Aquarell': 'digital_illustration/hand_drawn',
-  'Pixel Art': 'digital_illustration/pixel_art',
-  '3D': 'digital_illustration/handmade_3d',
-};
-
-// Map aspect ratios to Recraft V3 size values
-const RECRAFT_SIZE_MAP = {
-  '1:1': '1024x1024',
-  '16:9': '1365x1024',
-  '9:16': '1024x1365',
+// Style-specific enhancement instructions for Claude
+const STYLE_PROMPTS = {
+  'Illustration': 'digital illustration style with clean lines, vibrant colors, detailed shading, professional book illustration quality',
+  'Foto': 'photorealistic style, natural lighting, sharp focus, high resolution photograph, DSLR quality',
+  'Cartoon': 'cartoon style with bold outlines, exaggerated features, bright saturated colors, playful and fun',
+  'Aquarell': 'watercolor painting style with soft edges, flowing color transitions, visible brush strokes, delicate washes',
+  'Pixel Art': 'pixel art style with crisp pixels, limited color palette, retro 16-bit aesthetic, clean pixel placement',
+  '3D': '3D rendered style with smooth surfaces, realistic materials, volumetric lighting, Pixar-quality rendering',
+  'Anime': 'anime/manga style with large expressive eyes, dynamic poses, vibrant colors, Japanese animation aesthetic',
+  '\u00D6lgem\u00E4lde': 'oil painting style with rich textures, layered brushstrokes, classical composition, museum-quality fine art',
+  'Comic': 'comic book style with bold ink lines, halftone dots, dynamic panels, superhero comic aesthetic',
+  'Skizze': 'pencil sketch style with detailed linework, cross-hatching, artistic shading, hand-drawn quality',
 };
 
 exports.handler = async (event) => {
@@ -30,8 +27,8 @@ exports.handler = async (event) => {
 
   try {
     const { prompt, style, aspectRatio, model } = JSON.parse(event.body);
-    const useSchnell = model === 'schnell';
-    log('Start - model: ' + (useSchnell ? 'schnell' : 'quality') + ' prompt: ' + prompt?.slice(0, 50));
+    const selectedModel = model || 'quality';
+    log('Start - model: ' + selectedModel + ', style: ' + style + ', prompt: ' + prompt?.slice(0, 50));
 
     if (!prompt || prompt.trim().length < 3) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Prompt too short' }) };
@@ -43,6 +40,9 @@ exports.handler = async (event) => {
     if (!process.env.REPLICATE_API_KEY) {
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server config error', details: 'REPLICATE_API_KEY not configured' }) };
     }
+
+    // Get style-specific enhancement instruction
+    const styleInstruction = STYLE_PROMPTS[style] || STYLE_PROMPTS['Illustration'];
 
     // Step 1 + 2: Safety check AND prompt enhancement in PARALLEL
     log('Starting Claude calls (parallel)');
@@ -59,7 +59,7 @@ exports.handler = async (event) => {
           max_tokens: 100,
           messages: [{
             role: 'user',
-            content: 'You are a content safety filter for a children educational app (ages 11-15). Check if this image prompt is safe. Reply ONLY "SAFE" or "UNSAFE: reason". No violence, weapons, drugs, sexual content, horror, real people, hate. Educational and creative content is fine.\n\nPrompt: "' + prompt + '"'
+            content: 'You are a content safety filter for a children\'s educational art app (ages 11-15) at a German primary school.\n\nIMPORTANT: Prompts will usually be in GERMAN. Common German words are NOT inappropriate:\n- "Kinder" = children, "Menschen" = people, "Bild" = picture/image\n- "M\u00E4dchen" = girl, "Junge" = boy, "Frau" = woman, "Mann" = man\n- "Stadt" = city, "Haus" = house, "Wald" = forest\n- These are normal, innocent words. Do NOT flag them.\n\nOnly flag content that is genuinely harmful: explicit violence/gore, weapons used to harm, drugs, sexual/pornographic content, horror/extreme fear, hate speech, or content promoting discrimination.\n\nALLOW: People (children, adults, families), animals, nature, cities, countries, cultures, flags, food, buildings, art, abstract designs, fantasy creatures, educational content, historical topics, landscapes, portraits.\n\nReply ONLY "SAFE" or "UNSAFE: reason".\n\nPrompt: "' + prompt + '"'
           }]
         })
       }),
@@ -72,10 +72,10 @@ exports.handler = async (event) => {
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 200,
+          max_tokens: 300,
           messages: [{
             role: 'user',
-            content: 'Enhance this image prompt for AI generation. Add artistic details, lighting, composition. Keep child-friendly. Style: ' + (style || 'colorful illustration') + '. Original: "' + prompt + '". Reply with ONLY the enhanced prompt, max 100 words.'
+            content: 'You are an expert prompt engineer for AI image generation. Enhance this image prompt for maximum quality.\n\nThe prompt may be in German or other languages - translate and enhance to English.\n\nTARGET STYLE: ' + styleInstruction + '\n\nRULES:\n- AVOID cultural stereotypes. Show modern, diverse, realistic scenes.\n- African/Asian countries: include modern cities, schools, technology. NOT only traditional clothes and villages.\n- European countries: show diverse populations. NOT only stereotypical appearances.\n- Add specific artistic details: lighting (golden hour, studio, ambient), composition (rule of thirds, centered, dynamic angle), textures, atmosphere.\n- Include quality boosters: "highly detailed", "professional", "masterpiece", "8k resolution".\n- For the specified style, include style-specific keywords that produce the best results.\n- Keep child-friendly at all times.\n\nOriginal prompt: "' + prompt + '"\n\nReply with ONLY the enhanced prompt in English, max 150 words. No explanations.'
           }]
         })
       })
@@ -107,121 +107,84 @@ exports.handler = async (event) => {
         enhancedPrompt = enhanceResult.content[0].text;
       }
     }
-    log('Enhanced: ' + enhancedPrompt.slice(0, 80));
+    log('Enhanced: ' + enhancedPrompt.slice(0, 100));
 
-    // Step 3: Generate image with selected model
+    // Step 3: Start image generation (NO waiting - returns immediately)
+    const apiKey = process.env.REPLICATE_API_KEY;
     let replicateUrl, replicateBody;
 
-    if (useSchnell) {
-      // FLUX Schnell - fast, cheap
+    if (selectedModel === 'schnell') {
       replicateUrl = 'https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions';
       replicateBody = {
         input: {
           prompt: enhancedPrompt,
           num_outputs: 1,
           aspect_ratio: aspectRatio || '1:1',
-          output_format: 'webp',
+          output_format: 'png',
           output_quality: 90,
           go_fast: true
         }
       };
     } else {
-      // Recraft V3 - high quality, best for illustrations
-      const recraftStyle = RECRAFT_STYLE_MAP[style] || 'digital_illustration';
-      const recraftSize = RECRAFT_SIZE_MAP[aspectRatio] || '1024x1024';
-      replicateUrl = 'https://api.replicate.com/v1/models/recraft-ai/recraft-v3/predictions';
+      // quality (flux-1.1-pro)
+      replicateUrl = 'https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions';
       replicateBody = {
         input: {
           prompt: enhancedPrompt,
-          style: recraftStyle,
-          size: recraftSize
+          aspect_ratio: aspectRatio || '1:1',
+          output_format: 'png',
+          output_quality: 90,
+          safety_tolerance: 5
         }
       };
     }
 
-    log('Replicate call: ' + (useSchnell ? 'flux-schnell' : 'recraft-v3'));
-    const replicateResponse = await fetch(replicateUrl, {
+    log('Starting Replicate prediction: ' + selectedModel);
+    const response = await fetch(replicateUrl, {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer ' + process.env.REPLICATE_API_KEY,
+        'Authorization': 'Bearer ' + apiKey,
         'Content-Type': 'application/json',
-        'Prefer': 'wait'
       },
       body: JSON.stringify(replicateBody)
     });
 
-    log('Replicate HTTP: ' + replicateResponse.status);
-
-    if (!replicateResponse.ok) {
-      const errText = await replicateResponse.text();
-      log('Replicate error: ' + errText.slice(0, 300));
-
-      // If Recraft fails, try FLUX 1.1 Pro as fallback
-      if (!useSchnell) {
-        log('Falling back to flux-1.1-pro');
-        const fallbackResponse = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + process.env.REPLICATE_API_KEY,
-            'Content-Type': 'application/json',
-            'Prefer': 'wait'
-          },
-          body: JSON.stringify({
-            input: {
-              prompt: enhancedPrompt,
-              aspect_ratio: aspectRatio || '1:1',
-              output_format: 'webp',
-              output_quality: 90,
-              safety_tolerance: 2
-            }
-          })
-        });
-
-        if (fallbackResponse.ok) {
-          let fbResult = await fallbackResponse.json();
-          if (fbResult.status && fbResult.status !== 'succeeded' && fbResult.status !== 'failed') {
-            let attempts = 0;
-            while (fbResult.status !== 'succeeded' && fbResult.status !== 'failed' && attempts < 30) {
-              await new Promise(r => setTimeout(r, 1000));
-              const poll = await fetch(fbResult.urls.get, { headers: { 'Authorization': 'Bearer ' + process.env.REPLICATE_API_KEY } });
-              fbResult = await poll.json();
-              attempts++;
-            }
-          }
-          if (fbResult.status === 'succeeded' && fbResult.output) {
-            const imageUrl = Array.isArray(fbResult.output) ? fbResult.output[0] : fbResult.output;
-            log('FALLBACK SUCCESS');
-            return { statusCode: 200, headers, body: JSON.stringify({ imageUrl, enhancedPrompt, originalPrompt: prompt }) };
-          }
-        }
-      }
-
-      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Replicate API error', details: 'HTTP ' + replicateResponse.status + ': ' + errText.slice(0, 300) }) };
+    if (!response.ok) {
+      const errText = await response.text();
+      log('Replicate start error ' + response.status + ': ' + errText.slice(0, 300));
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Replicate API error', details: errText.slice(0, 200) }) };
     }
 
-    let result = await replicateResponse.json();
-    log('Replicate status: ' + result.status);
+    const prediction = await response.json();
+    log('Prediction started: ' + prediction.id + ' status: ' + prediction.status);
 
-    // Poll if not yet complete
-    if (result.status && result.status !== 'succeeded' && result.status !== 'failed') {
-      log('Polling...');
-      let attempts = 0;
-      while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < 30) {
-        await new Promise(r => setTimeout(r, 1000));
-        const poll = await fetch(result.urls.get, { headers: { 'Authorization': 'Bearer ' + process.env.REPLICATE_API_KEY } });
-        result = await poll.json();
-        attempts++;
+    // Check if completed immediately (very fast models)
+    if (prediction.status === 'succeeded' && prediction.output) {
+      const output = prediction.output;
+      let imageUrl;
+      if (Array.isArray(output)) imageUrl = output[0];
+      else if (typeof output === 'string') imageUrl = output;
+      else if (output.url) imageUrl = output.url;
+      else if (output.images && output.images[0]) imageUrl = output.images[0].url || output.images[0];
+
+      if (imageUrl) {
+        log('Instant success: ' + imageUrl.slice(0, 80));
+        return { statusCode: 200, headers, body: JSON.stringify({ imageUrl, enhancedPrompt, originalPrompt: prompt }) };
       }
     }
 
-    if (result.status === 'succeeded' && result.output) {
-      const imageUrl = Array.isArray(result.output) ? result.output[0] : result.output;
-      log('SUCCESS - ' + imageUrl.slice(0, 80));
-      return { statusCode: 200, headers, body: JSON.stringify({ imageUrl, enhancedPrompt, originalPrompt: prompt }) };
-    } else {
-      log('Failed: ' + JSON.stringify(result).slice(0, 300));
-      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Generation failed', details: result.error || result.status || 'Unknown' }) };
+    // Return poll URL for client-side polling
+    if (prediction.urls?.get) {
+      log('Returning poll URL for async completion');
+      return { statusCode: 200, headers, body: JSON.stringify({
+        status: 'processing',
+        pollUrl: prediction.urls.get,
+        enhancedPrompt,
+        originalPrompt: prompt,
+      })};
     }
+
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Unexpected response', details: JSON.stringify(prediction).slice(0, 200) }) };
 
   } catch (err) {
     console.log('CATCH:', err.message, err.stack);

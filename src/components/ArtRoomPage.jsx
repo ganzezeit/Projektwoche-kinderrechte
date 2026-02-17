@@ -3,6 +3,7 @@ import { ref, onValue, push, set } from 'firebase/database';
 import { db } from '../firebase';
 
 const API_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/generate-image';
+const POLL_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/poll-image';
 
 const DEVICE_LANG = (() => {
   const raw = (navigator.language || navigator.languages?.[0] || 'en').slice(0, 2).toLowerCase();
@@ -94,6 +95,10 @@ const STYLES = [
   { id: 'watercolor', label: 'Aquarell', emoji: '\u{1F3A8}', color: '#C8E6C9' },
   { id: 'pixel', label: 'Pixel Art', emoji: '\u{1F47E}', color: '#D1C4E9' },
   { id: '3d', label: '3D', emoji: '\u{1F9CA}', color: '#B2EBF2' },
+  { id: 'anime', label: 'Anime', emoji: '\u{1F338}', color: '#F3E5F5' },
+  { id: 'oil', label: '\u00D6lgem\u00E4lde', emoji: '\u{1F5BC}\uFE0F', color: '#FFF9C4' },
+  { id: 'comic', label: 'Comic', emoji: '\u{1F4A5}', color: '#FFCCBC' },
+  { id: 'sketch', label: 'Skizze', emoji: '\u270F\uFE0F', color: '#E0E0E0' },
 ];
 
 const RATIOS = ['1:1', '16:9', '9:16'];
@@ -109,13 +114,17 @@ export default function ArtRoomPage({ code }) {
   const [prompt, setPrompt] = useState('');
   const [selectedStyle, setSelectedStyle] = useState('illustration');
   const [selectedRatio, setSelectedRatio] = useState('1:1');
-  const [selectedModel, setSelectedModel] = useState('schnell');
+  const [selectedModel, setSelectedModel] = useState('quality');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
   const [sharedGallery, setSharedGallery] = useState([]);
   const [previewImg, setPreviewImg] = useState(null);
   const progressRef = useRef(null);
+
+  // Multi-room state
+  const [studios, setStudios] = useState([]);
+  const [assignedStudio, setAssignedStudio] = useState(null);
 
   // Inject animations
   useEffect(() => {
@@ -167,13 +176,56 @@ export default function ArtRoomPage({ code }) {
     if (!generating) { setProgress(0); return; }
     setProgress(0);
     const start = Date.now();
-    const dur = selectedModel === 'schnell' ? 15000 : 30000;
+    const dur = selectedModel === 'schnell' ? 15000 : 20000;
     progressRef.current = setInterval(() => {
       const pct = Math.min(95, ((Date.now() - start) / dur) * 100);
       setProgress(pct);
     }, 200);
     return () => { if (progressRef.current) clearInterval(progressRef.current); };
   }, [generating, selectedModel]);
+
+  // Subscribe to studios (sub-rooms)
+  useEffect(() => {
+    const u = onValue(ref(db, 'artRooms/' + code + '/studios'), snap => {
+      const d = snap.val();
+      setStudios(d ? Object.entries(d).map(([id, v]) => ({
+        id, name: v.name,
+        allowedModels: v.allowedModels || ['schnell', 'quality'],
+        participants: v.participants
+          ? (Array.isArray(v.participants) ? v.participants : Object.values(v.participants))
+          : [],
+      })) : []);
+    });
+    return () => u();
+  }, [code]);
+
+  // Detect studio assignment
+  useEffect(() => {
+    if (!author || studios.length === 0) { setAssignedStudio(null); return; }
+    const found = studios.find(s => s.participants.some(p => p.name === author));
+    setAssignedStudio(found || null);
+  }, [studios, author]);
+
+  // Register as participant (once per room, survives page refresh)
+  useEffect(() => {
+    if (!nameSet || !author) return;
+    const regKey = 'artroom-reg-' + code;
+    if (localStorage.getItem(regKey)) return;
+    localStorage.setItem(regKey, '1');
+    push(ref(db, 'artRooms/' + code + '/participants'), { name: author, joinedAt: Date.now() });
+  }, [nameSet, author, code]);
+
+  // Compute allowed models: use assigned studio's models or room-level fallback
+  const allowedModels = assignedStudio
+    ? assignedStudio.allowedModels
+    : (room?.settings?.allowedModels || ['schnell', 'quality']);
+
+  // If selected model is not allowed, auto-switch to first allowed
+  useEffect(() => {
+    if (allowedModels.length > 0 && !allowedModels.includes(selectedModel)) {
+      setSelectedModel(allowedModels[0]);
+    }
+  }, [JSON.stringify(allowedModels), selectedModel]);
 
   const handleSetName = (e) => {
     e.preventDefault();
@@ -211,13 +263,60 @@ export default function ArtRoomPage({ code }) {
         return;
       }
 
+      let finalImageUrl = data.imageUrl;
+      let finalEnhancedPrompt = data.enhancedPrompt || '';
+
+      // Async polling for slower models (premium/ultra)
+      if (!finalImageUrl && data.status === 'processing' && data.pollUrl) {
+        const pollInterval = 2000;
+        const maxPolls = 90; // 3 minutes max
+        let polls = 0;
+        let done = false;
+        while (polls < maxPolls && !done) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          polls++;
+          try {
+            const pollRes = await fetch(POLL_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pollUrl: data.pollUrl }),
+            });
+            const pollData = await pollRes.json();
+            if (pollData.status === 'succeeded' && pollData.imageUrl) {
+              finalImageUrl = pollData.imageUrl;
+              finalEnhancedPrompt = data.enhancedPrompt || '';
+              done = true;
+            } else if (pollData.status === 'failed') {
+              setError(pollData.error || 'Bildgenerierung fehlgeschlagen');
+              setGenerating(false);
+              return;
+            } else {
+              setProgress(Math.min(90, 30 + polls * 2));
+            }
+          } catch {
+            // Poll network error - keep trying
+          }
+        }
+        if (!done) {
+          setError('Zeitüberschreitung - bitte erneut versuchen');
+          setGenerating(false);
+          return;
+        }
+      }
+
+      if (!finalImageUrl) {
+        setError('Unerwartete Antwort vom Server');
+        setGenerating(false);
+        return;
+      }
+
       setProgress(100);
 
       // Save to Firebase shared gallery
       await push(ref(db, 'artRooms/' + code + '/images'), {
-        imageUrl: data.imageUrl,
+        imageUrl: finalImageUrl,
         prompt: prompt.trim(),
-        enhancedPrompt: data.enhancedPrompt || '',
+        enhancedPrompt: finalEnhancedPrompt,
         author,
         createdAt: Date.now(),
         style: styleName,
@@ -282,7 +381,20 @@ export default function ArtRoomPage({ code }) {
     );
   }
 
-  const isPaused = room.settings && !room.settings.imageEnabled;
+  // Waiting room: shown when studios exist but student is not yet assigned
+  if (studios.length > 0 && !assignedStudio) {
+    return (
+      <div style={st.page}>
+        <div style={st.centerBox}>
+          <div style={{ fontSize: 48, animation: 'artPulse 1.5s ease-in-out infinite' }}>{'\u231B'}</div>
+          <p style={{ ...st.closedText, maxWidth: 300 }}>Bitte warte, bis du einem Raum zugewiesen wirst...</p>
+          <div style={st.authorBadge}>{author}</div>
+        </div>
+      </div>
+    );
+  }
+
+  const isPaused = room && room.settings && !room.settings.imageEnabled;
 
   // Main studio
   return (
@@ -305,13 +417,13 @@ export default function ArtRoomPage({ code }) {
             <div style={st.promptWrap}>
               <textarea
                 value={prompt}
-                onChange={e => setPrompt(e.target.value.slice(0, 300))}
+                onChange={e => setPrompt(e.target.value.slice(0, 500))}
                 placeholder={t.placeholder}
                 style={st.textarea}
-                maxLength={300}
+                maxLength={500}
                 rows={3}
               />
-              <div style={st.charCount}>{prompt.length}/300 {t.chars}</div>
+              <div style={st.charCount}>{prompt.length}/500 {t.chars}</div>
             </div>
 
             <div style={st.chipsRow}>
@@ -346,31 +458,41 @@ export default function ArtRoomPage({ code }) {
               ))}
             </div>
 
-            {/* Model selector */}
-            <div style={st.modelRow}>
-              <button
-                onClick={() => setSelectedModel('schnell')}
-                style={{
-                  ...st.modelBtn,
-                  background: selectedModel === 'schnell' ? 'rgba(78,205,196,0.2)' : 'rgba(255,255,255,0.05)',
-                  border: selectedModel === 'schnell' ? '2px solid rgba(78,205,196,0.5)' : '2px solid rgba(255,255,255,0.1)',
-                  color: selectedModel === 'schnell' ? '#4ECDC4' : 'rgba(255,255,255,0.5)',
-                }}
-              >
-                {'\u26A1'} Schnell
-              </button>
-              <button
-                onClick={() => setSelectedModel('quality')}
-                style={{
-                  ...st.modelBtn,
-                  background: selectedModel === 'quality' ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
-                  border: selectedModel === 'quality' ? '2px solid rgba(167,139,250,0.5)' : '2px solid rgba(255,255,255,0.1)',
-                  color: selectedModel === 'quality' ? '#A78BFA' : 'rgba(255,255,255,0.5)',
-                }}
-              >
-                {'\u2728'} Qualit\u00E4t
-              </button>
-            </div>
+            {/* Model selector - only show allowed models */}
+            {allowedModels.length > 1 && (
+              <div style={st.modelRow}>
+                {allowedModels.includes('schnell') && (
+                  <button
+                    onClick={() => setSelectedModel('schnell')}
+                    style={{
+                      ...st.modelBtn,
+                      background: selectedModel === 'schnell' ? 'rgba(78,205,196,0.2)' : 'rgba(255,255,255,0.05)',
+                      border: selectedModel === 'schnell' ? '2px solid rgba(78,205,196,0.5)' : '2px solid rgba(255,255,255,0.1)',
+                      color: selectedModel === 'schnell' ? '#4ECDC4' : 'rgba(255,255,255,0.5)',
+                      boxShadow: selectedModel === 'schnell' ? '0 0 12px rgba(78,205,196,0.3)' : 'none',
+                    }}
+                  >
+                    <span>{'\u26A1'} Schnell</span>
+                    <span style={st.modelHint}>~1 Sek.</span>
+                  </button>
+                )}
+                {allowedModels.includes('quality') && (
+                  <button
+                    onClick={() => setSelectedModel('quality')}
+                    style={{
+                      ...st.modelBtn,
+                      background: selectedModel === 'quality' ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
+                      border: selectedModel === 'quality' ? '2px solid rgba(167,139,250,0.5)' : '2px solid rgba(255,255,255,0.1)',
+                      color: selectedModel === 'quality' ? '#A78BFA' : 'rgba(255,255,255,0.5)',
+                      boxShadow: selectedModel === 'quality' ? '0 0 12px rgba(167,139,250,0.3)' : 'none',
+                    }}
+                  >
+                    <span>{'\u2728 Qualit\u00E4t'}</span>
+                    <span style={st.modelHint}>~5 Sek.</span>
+                  </button>
+                )}
+              </div>
+            )}
 
             <button
               onClick={handleGenerate}
@@ -629,10 +751,20 @@ const st = {
     fontFamily: "'Fredoka', sans-serif",
     fontSize: 13,
     fontWeight: 700,
-    padding: '7px 16px',
+    padding: '7px 12px',
     borderRadius: 12,
     cursor: 'pointer',
     transition: 'all 0.15s ease',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 2,
+    flex: 1,
+  },
+  modelHint: {
+    fontSize: 9,
+    fontWeight: 500,
+    opacity: 0.6,
   },
   generateBtn: {
     fontFamily: "'Lilita One', cursive",

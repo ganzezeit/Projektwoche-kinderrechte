@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { ref, set, onValue, remove } from 'firebase/database';
+import { ref, set, onValue, remove, push } from 'firebase/database';
 import { db } from '../firebase';
 
 const API_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/generate-image';
+const POLL_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/poll-image';
 
 function generateCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -127,6 +128,10 @@ const STYLES = [
   { id: 'watercolor', label: 'Aquarell', emoji: '\u{1F3A8}', color: '#C8E6C9' },
   { id: 'pixel', label: 'Pixel Art', emoji: '\u{1F47E}', color: '#D1C4E9' },
   { id: '3d', label: '3D', emoji: '\u{1F9CA}', color: '#B2EBF2' },
+  { id: 'anime', label: 'Anime', emoji: '\u{1F338}', color: '#F3E5F5' },
+  { id: 'oil', label: '\u00D6lgem\u00E4lde', emoji: '\u{1F5BC}\uFE0F', color: '#FFF9C4' },
+  { id: 'comic', label: 'Comic', emoji: '\u{1F4A5}', color: '#FFCCBC' },
+  { id: 'sketch', label: 'Skizze', emoji: '\u270F\uFE0F', color: '#E0E0E0' },
 ];
 
 const RATIOS = ['1:1', '16:9', '9:16'];
@@ -136,7 +141,7 @@ export default function ArtStudio({ onClose, initialMode }) {
   const [prompt, setPrompt] = useState('');
   const [selectedStyle, setSelectedStyle] = useState('illustration');
   const [selectedRatio, setSelectedRatio] = useState('1:1');
-  const [selectedModel, setSelectedModel] = useState('schnell');
+  const [selectedModel, setSelectedModel] = useState('quality');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
@@ -150,6 +155,15 @@ export default function ArtStudio({ onClose, initialMode }) {
   const [room, setRoom] = useState(null);
   const [studentImages, setStudentImages] = useState([]);
   const [showRoom, setShowRoom] = useState(initialMode === 'room');
+
+  // Multi-room state
+  const [participants, setParticipants] = useState([]);
+  const [studios, setStudios] = useState([]);
+  const [dragOverTarget, setDragOverTarget] = useState(null);
+  const [studioMenuOpen, setStudioMenuOpen] = useState(null);
+  const dragItemRef = useRef(null);
+  const touchCloneRef = useRef(null);
+  const touchStartRef = useRef(null);
 
   // Inject animation styles
   useEffect(() => {
@@ -198,13 +212,168 @@ export default function ArtStudio({ onClose, initialMode }) {
     if (!generating) { setProgress(0); return; }
     setProgress(0);
     const start = Date.now();
-    const dur = selectedModel === 'schnell' ? 15000 : 30000;
+    const dur = selectedModel === 'schnell' ? 15000 : 20000;
     progressRef.current = setInterval(() => {
       const elapsed = Date.now() - start;
       setProgress(Math.min(95, (elapsed / dur) * 100));
     }, 200);
     return () => { if (progressRef.current) clearInterval(progressRef.current); };
   }, [generating, selectedModel]);
+
+  // Subscribe to participants pool
+  useEffect(() => {
+    if (!roomCode) { setParticipants([]); return; }
+    const u = onValue(ref(db, 'artRooms/' + roomCode + '/participants'), snap => {
+      const d = snap.val();
+      setParticipants(d ? Object.entries(d).map(([id, v]) => ({ id, name: v.name })) : []);
+    });
+    return () => u();
+  }, [roomCode]);
+
+  // Subscribe to studios (sub-rooms)
+  useEffect(() => {
+    if (!roomCode) { setStudios([]); return; }
+    const u = onValue(ref(db, 'artRooms/' + roomCode + '/studios'), snap => {
+      const d = snap.val();
+      setStudios(d ? Object.entries(d).map(([id, v]) => ({
+        id, name: v.name,
+        allowedModels: v.allowedModels || ['schnell', 'quality'],
+        participants: v.participants
+          ? (Array.isArray(v.participants) ? v.participants : Object.values(v.participants))
+          : [],
+      })) : []);
+    });
+    return () => u();
+  }, [roomCode]);
+
+  // Cleanup touch clone on unmount
+  useEffect(() => () => {
+    if (touchCloneRef.current) { touchCloneRef.current.remove(); touchCloneRef.current = null; }
+  }, []);
+
+  // Close studio menu on outside click
+  useEffect(() => {
+    if (!studioMenuOpen) return;
+    const h = () => setStudioMenuOpen(null);
+    setTimeout(() => document.addEventListener('click', h), 0);
+    return () => document.removeEventListener('click', h);
+  }, [studioMenuOpen]);
+
+  // === Assignment logic ===
+  const getAssignedStudioId = useCallback((name) => {
+    for (const s of studios) if (s.participants.some(p => p.name === name)) return s.id;
+    return null;
+  }, [studios]);
+
+  const assignParticipant = useCallback(async ({ name }, targetId) => {
+    const curId = getAssignedStudioId(name);
+    if (curId === targetId || (!curId && targetId === 'pool')) return;
+    if (curId) {
+      const studio = studios.find(s => s.id === curId);
+      if (studio) {
+        const nl = studio.participants.filter(p => p.name !== name);
+        await set(ref(db, 'artRooms/' + roomCode + '/studios/' + curId + '/participants'), nl.length ? nl : []);
+      }
+    }
+    if (targetId !== 'pool') {
+      const tr = studios.find(s => s.id === targetId);
+      if (tr) await set(ref(db, 'artRooms/' + roomCode + '/studios/' + targetId + '/participants'), [...tr.participants, { name }]);
+    }
+  }, [studios, roomCode, getAssignedStudioId]);
+
+  // === Studio CRUD ===
+  const handleCreateStudio = async () => {
+    if (!roomCode) return;
+    const nums = studios.map(s => { const m = s.name.match(/(\d+)/); return m ? +m[1] : 0; });
+    await push(ref(db, 'artRooms/' + roomCode + '/studios'), {
+      name: 'Raum ' + (Math.max(0, ...nums) + 1),
+      allowedModels: ['schnell', 'quality'],
+    });
+  };
+
+  const handleDeleteStudio = async (id) => {
+    if (!roomCode) return;
+    setStudioMenuOpen(null);
+    await remove(ref(db, 'artRooms/' + roomCode + '/studios/' + id));
+  };
+
+  const handleToggleStudioModel = async (studioId, modelKey) => {
+    if (!roomCode) return;
+    const studio = studios.find(s => s.id === studioId);
+    if (!studio) return;
+    const current = studio.allowedModels;
+    let updated;
+    if (current.includes(modelKey)) {
+      updated = current.filter(m => m !== modelKey);
+      if (updated.length === 0) return;
+    } else {
+      updated = [...current, modelKey];
+    }
+    await set(ref(db, 'artRooms/' + roomCode + '/studios/' + studioId + '/allowedModels'), updated);
+  };
+
+  // === HTML5 Drag & Drop ===
+  const onDragStart = (e, p) => { dragItemRef.current = p; e.dataTransfer.effectAllowed = 'move'; };
+  const onDragEnd = () => { dragItemRef.current = null; setDragOverTarget(null); };
+  const onDragOver = (e, id) => { e.preventDefault(); setDragOverTarget(id); };
+  const onDragLeave = (_, id) => { if (dragOverTarget === id) setDragOverTarget(null); };
+  const onDrop = (e, id) => {
+    e.preventDefault(); setDragOverTarget(null);
+    if (dragItemRef.current) { assignParticipant(dragItemRef.current, id); dragItemRef.current = null; }
+  };
+
+  // === Touch Drag & Drop ===
+  const findDropTarget = (x, y) => {
+    if (touchCloneRef.current) touchCloneRef.current.style.display = 'none';
+    let el = document.elementFromPoint(x, y);
+    if (touchCloneRef.current) touchCloneRef.current.style.display = '';
+    while (el && el !== document.body) {
+      if (el.dataset?.dropId) return el.dataset.dropId;
+      el = el.parentElement;
+    }
+    return null;
+  };
+
+  const onTouchStart = (e, p) => {
+    const t = e.touches[0];
+    dragItemRef.current = p;
+    touchStartRef.current = { x: t.clientX, y: t.clientY, el: e.currentTarget, moved: false };
+  };
+
+  const onTouchMove = useCallback((e) => {
+    const ts = touchStartRef.current;
+    if (!ts) return;
+    const t = e.touches[0];
+    if (!ts.moved) {
+      if ((t.clientX - ts.x) ** 2 + (t.clientY - ts.y) ** 2 < 64) return;
+      ts.moved = true;
+      const rect = ts.el.getBoundingClientRect();
+      const clone = ts.el.cloneNode(true);
+      Object.assign(clone.style, {
+        position: 'fixed', left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px',
+        zIndex: '9999', opacity: '0.85', pointerEvents: 'none',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.25)', transform: 'scale(1.08)', borderRadius: '20px',
+      });
+      document.body.appendChild(clone);
+      touchCloneRef.current = clone;
+    }
+    if (touchCloneRef.current) {
+      const w = parseFloat(touchCloneRef.current.style.width) || 60;
+      touchCloneRef.current.style.left = (t.clientX - w / 2) + 'px';
+      touchCloneRef.current.style.top = (t.clientY - 20) + 'px';
+    }
+    setDragOverTarget(findDropTarget(t.clientX, t.clientY));
+  }, []);
+
+  const onTouchEnd = useCallback((e) => {
+    if (touchCloneRef.current) {
+      const t = e.changedTouches[0];
+      const tid = findDropTarget(t.clientX, t.clientY);
+      touchCloneRef.current.remove(); touchCloneRef.current = null;
+      if (dragItemRef.current && tid) assignParticipant(dragItemRef.current, tid);
+    }
+    dragItemRef.current = null; touchStartRef.current = null; setDragOverTarget(null);
+  }, [assignParticipant]);
 
   const handleCreateRoom = async () => {
     const code = generateCode();
@@ -271,9 +440,56 @@ export default function ArtStudio({ onClose, initialMode }) {
         return;
       }
 
-      setResult(data);
-      setProgress(100);
-      setGallery(prev => [{ ...data, style: styleName, ratio: selectedRatio, timestamp: Date.now() }, ...prev]);
+      // If image ready immediately (fast models)
+      if (data.imageUrl) {
+        setResult(data);
+        setProgress(100);
+        setGallery(prev => [{ ...data, style: styleName, ratio: selectedRatio, timestamp: Date.now() }, ...prev]);
+        setGenerating(false);
+        return;
+      }
+
+      // Async polling for slower models (premium/ultra)
+      if (data.status === 'processing' && data.pollUrl) {
+        const pollInterval = 2000;
+        const maxPolls = 90; // 3 minutes max
+        let polls = 0;
+        while (polls < maxPolls) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          polls++;
+          try {
+            const pollRes = await fetch(POLL_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pollUrl: data.pollUrl }),
+            });
+            const pollData = await pollRes.json();
+            if (pollData.status === 'succeeded' && pollData.imageUrl) {
+              const finalData = { imageUrl: pollData.imageUrl, enhancedPrompt: data.enhancedPrompt, originalPrompt: data.originalPrompt };
+              setResult(finalData);
+              setProgress(100);
+              setGallery(prev => [{ ...finalData, style: styleName, ratio: selectedRatio, timestamp: Date.now() }, ...prev]);
+              setGenerating(false);
+              return;
+            }
+            if (pollData.status === 'failed') {
+              setError(pollData.error || 'Bildgenerierung fehlgeschlagen');
+              setGenerating(false);
+              return;
+            }
+            // Still processing - update progress
+            setProgress(Math.min(90, 30 + polls * 2));
+          } catch {
+            // Poll network error - keep trying
+          }
+        }
+        setError('Zeitüberschreitung - bitte erneut versuchen');
+        setGenerating(false);
+        return;
+      }
+
+      // Unexpected response
+      setError('Unerwartete Antwort vom Server');
     } catch (err) {
       setError(`Netzwerkfehler: ${err.message}`);
     }
@@ -289,7 +505,7 @@ export default function ArtStudio({ onClose, initialMode }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ki-kunst-${Date.now()}.webp`;
+      a.download = `ki-kunst-${Date.now()}.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -357,6 +573,141 @@ export default function ArtStudio({ onClose, initialMode }) {
                 </div>
               </div>
 
+              {/* Room Manager: Participants + Studios */}
+              <div style={st.roomManagerWrap}>
+                {/* Left: Participant Pool */}
+                <div style={st.rmLeftCol}>
+                  <div style={st.rmColHead}>
+                    <span style={st.rmColTitle}>Teilnehmer</span>
+                    <span style={st.rmBadge}>{participants.length}</span>
+                  </div>
+                  <div
+                    data-drop-id="pool"
+                    onDragOver={e => onDragOver(e, 'pool')}
+                    onDragLeave={e => onDragLeave(e, 'pool')}
+                    onDrop={e => onDrop(e, 'pool')}
+                    style={{
+                      ...st.rmPool,
+                      ...(dragOverTarget === 'pool' ? st.rmDropGlow : {}),
+                    }}
+                  >
+                    {participants.length === 0 && <p style={st.rmEmpty}>Noch keine Teilnehmer</p>}
+                    {(() => {
+                      const assignedKeys = new Set();
+                      studios.forEach(s => s.participants.forEach(p => assignedKeys.add(p.name)));
+                      const unassigned = participants.filter(p => !assignedKeys.has(p.name));
+                      const assigned = participants.filter(p => assignedKeys.has(p.name));
+                      return (
+                        <>
+                          {unassigned.map(p => (
+                            <div
+                              key={'u-' + p.id}
+                              draggable
+                              onDragStart={e => onDragStart(e, p)}
+                              onDragEnd={onDragEnd}
+                              onTouchStart={e => onTouchStart(e, p)}
+                              onTouchMove={onTouchMove}
+                              onTouchEnd={onTouchEnd}
+                              style={{ ...st.rmCard, cursor: 'grab', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                            >
+                              {p.name}
+                            </div>
+                          ))}
+                          {assigned.map(p => (
+                            <div key={'g-' + p.id} style={{ ...st.rmCard, opacity: 0.35, cursor: 'default' }}>
+                              {p.name}
+                            </div>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Right: Studios */}
+                <div style={st.rmRightCol}>
+                  <div style={st.rmColHead}>
+                    <span style={st.rmColTitle}>Kunst-R\u00E4ume</span>
+                    <button onClick={handleCreateStudio} style={st.rmAddBtn}>+ Neuer Raum</button>
+                  </div>
+                  <div style={st.rmRoomsList}>
+                    {studios.length === 0 && <p style={st.rmEmpty}>Noch keine R\u00E4ume erstellt</p>}
+                    {studios.map(studio => (
+                      <div
+                        key={studio.id}
+                        data-drop-id={studio.id}
+                        onDragOver={e => onDragOver(e, studio.id)}
+                        onDragLeave={e => onDragLeave(e, studio.id)}
+                        onDrop={e => onDrop(e, studio.id)}
+                        style={{
+                          ...st.rmRoomBox,
+                          ...(dragOverTarget === studio.id ? st.rmDropGlow : {}),
+                        }}
+                      >
+                        <div style={st.rmRoomHead}>
+                          <div style={st.rmRoomName}>{studio.name}</div>
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              onClick={e => { e.stopPropagation(); setStudioMenuOpen(studioMenuOpen === studio.id ? null : studio.id); }}
+                              style={st.rmDots}
+                            >{'\u22EE'}</button>
+                            {studioMenuOpen === studio.id && (
+                              <div style={st.rmMenu} onClick={e => e.stopPropagation()}>
+                                <button onClick={() => handleDeleteStudio(studio.id)} style={{ ...st.rmMenuItem, color: '#FF6B6B' }}>
+                                  {'\u{1F5D1}\uFE0F'} Raum l\u00F6schen
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {/* Model toggles for this studio */}
+                        <div style={st.rmModelRow}>
+                          {[
+                            { key: 'schnell', label: '\u26A1', color: '#4ECDC4' },
+                            { key: 'quality', label: '\u2728', color: '#A78BFA' },
+                          ].map(m => {
+                            const on = studio.allowedModels.includes(m.key);
+                            return (
+                              <button
+                                key={m.key}
+                                onClick={() => handleToggleStudioModel(studio.id, m.key)}
+                                style={{
+                                  ...st.rmModelToggle,
+                                  background: on ? m.color + '30' : 'rgba(255,255,255,0.05)',
+                                  border: on ? '1px solid ' + m.color : '1px solid rgba(255,255,255,0.1)',
+                                  color: on ? m.color : 'rgba(255,255,255,0.2)',
+                                }}
+                                title={m.key}
+                              >
+                                {m.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {/* Participant cards */}
+                        <div style={st.rmRoomCards}>
+                          {studio.participants.length === 0 && <span style={st.rmDropHint}>Teilnehmer hierher ziehen</span>}
+                          {studio.participants.map((p, i) => (
+                            <div
+                              key={studio.id + '-' + i}
+                              draggable
+                              onDragStart={e => onDragStart(e, p)}
+                              onDragEnd={onDragEnd}
+                              onTouchStart={e => onTouchStart(e, p)}
+                              onTouchMove={onTouchMove}
+                              onTouchEnd={onTouchEnd}
+                              style={{ ...st.rmCard, cursor: 'grab', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                            >
+                              {p.name}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               {/* Student images */}
               <div style={st.studentGalTitle}>{t.studentGallery} ({studentImages.length})</div>
               {studentImages.length === 0 && (
@@ -383,13 +734,13 @@ export default function ArtStudio({ onClose, initialMode }) {
               <div style={st.promptWrap}>
                 <textarea
                   value={prompt}
-                  onChange={e => setPrompt(e.target.value.slice(0, 300))}
+                  onChange={e => setPrompt(e.target.value.slice(0, 500))}
                   placeholder={t.placeholder}
                   style={st.textarea}
-                  maxLength={300}
+                  maxLength={500}
                   rows={3}
                 />
-                <div style={st.charCount}>{prompt.length}/300 {t.chars}</div>
+                <div style={st.charCount}>{prompt.length}/500 {t.chars}</div>
               </div>
 
               {/* Style chips */}
@@ -435,9 +786,11 @@ export default function ArtStudio({ onClose, initialMode }) {
                     background: selectedModel === 'schnell' ? 'rgba(78,205,196,0.2)' : 'rgba(255,255,255,0.05)',
                     border: selectedModel === 'schnell' ? '2px solid rgba(78,205,196,0.5)' : '2px solid rgba(255,255,255,0.1)',
                     color: selectedModel === 'schnell' ? '#4ECDC4' : 'rgba(255,255,255,0.5)',
+                    boxShadow: selectedModel === 'schnell' ? '0 0 12px rgba(78,205,196,0.3)' : 'none',
                   }}
                 >
-                  {'\u26A1'} Schnell
+                  <span>{'\u26A1'} Schnell</span>
+                  <span style={st.modelHint}>~1 Sek.</span>
                 </button>
                 <button
                   onClick={() => setSelectedModel('quality')}
@@ -446,9 +799,11 @@ export default function ArtStudio({ onClose, initialMode }) {
                     background: selectedModel === 'quality' ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
                     border: selectedModel === 'quality' ? '2px solid rgba(167,139,250,0.5)' : '2px solid rgba(255,255,255,0.1)',
                     color: selectedModel === 'quality' ? '#A78BFA' : 'rgba(255,255,255,0.5)',
+                    boxShadow: selectedModel === 'quality' ? '0 0 12px rgba(167,139,250,0.3)' : 'none',
                   }}
                 >
-                  {'\u2728'} Qualit\u00E4t
+                  <span>{'\u2728 Qualit\u00E4t'}</span>
+                  <span style={st.modelHint}>~5 Sek.</span>
                 </button>
               </div>
 
@@ -543,7 +898,7 @@ const st = {
   modal: {
     width: '100%',
     height: '100%',
-    maxWidth: 600,
+    maxWidth: 700,
     maxHeight: '100dvh',
     background: 'linear-gradient(135deg, #1a0a2e, #0B0D1A)',
     display: 'flex',
@@ -675,6 +1030,187 @@ const st = {
     background: 'rgba(255,107,107,0.2)',
     color: '#FF6B6B',
   },
+  // Room Manager styles
+  roomManagerWrap: {
+    display: 'flex',
+    gap: 12,
+    minHeight: 180,
+  },
+  rmLeftCol: {
+    flex: '1 1 140px',
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+  },
+  rmRightCol: {
+    flex: '1.5 1 200px',
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+  },
+  rmColHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    flexShrink: 0,
+  },
+  rmColTitle: {
+    fontFamily: "'Lilita One', cursive",
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
+  },
+  rmBadge: {
+    fontFamily: "'Baloo 2', cursive",
+    fontSize: 12,
+    fontWeight: 700,
+    background: 'rgba(255,255,255,0.1)',
+    padding: '1px 8px',
+    borderRadius: 10,
+    color: 'rgba(255,255,255,0.5)',
+  },
+  rmPool: {
+    flex: 1,
+    overflowY: 'auto',
+    background: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    border: '2px dashed rgba(255,255,255,0.12)',
+    padding: 8,
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 5,
+    alignContent: 'flex-start',
+    minHeight: 60,
+    transition: 'border-color 0.2s, background 0.2s, box-shadow 0.2s',
+  },
+  rmCard: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '4px 10px',
+    borderRadius: 14,
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 12,
+    fontWeight: 700,
+    background: 'rgba(167,139,250,0.15)',
+    color: '#A78BFA',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+    transition: 'opacity 0.2s',
+  },
+  rmAddBtn: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 11,
+    fontWeight: 700,
+    color: 'white',
+    border: 'none',
+    borderRadius: 8,
+    padding: '4px 10px',
+    cursor: 'pointer',
+    background: 'linear-gradient(135deg, #A78BFA, #4ECDC4)',
+  },
+  rmRoomsList: {
+    flex: 1,
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    minHeight: 60,
+  },
+  rmRoomBox: {
+    background: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    border: '2px dashed rgba(255,255,255,0.12)',
+    padding: 10,
+    transition: 'border-color 0.2s, background 0.2s, box-shadow 0.2s',
+  },
+  rmRoomHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  rmRoomName: {
+    fontFamily: "'Lilita One', cursive",
+    fontSize: 14,
+    color: 'white',
+  },
+  rmDots: {
+    fontSize: 16,
+    fontWeight: 700,
+    background: 'rgba(255,255,255,0.06)',
+    border: 'none',
+    borderRadius: 6,
+    padding: '1px 6px',
+    cursor: 'pointer',
+    color: 'rgba(255,255,255,0.4)',
+    lineHeight: 1,
+  },
+  rmMenu: {
+    position: 'absolute',
+    right: 0,
+    top: 24,
+    background: '#1a0a2e',
+    borderRadius: 10,
+    boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+    overflow: 'hidden',
+    zIndex: 100,
+    minWidth: 140,
+    border: '1px solid rgba(255,255,255,0.1)',
+  },
+  rmMenuItem: {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '8px 14px',
+    border: 'none',
+    background: 'none',
+    cursor: 'pointer',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  rmModelRow: {
+    display: 'flex',
+    gap: 4,
+    marginBottom: 6,
+  },
+  rmModelToggle: {
+    fontSize: 14,
+    padding: '3px 8px',
+    borderRadius: 8,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    background: 'none',
+  },
+  rmRoomCards: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 5,
+    minHeight: 28,
+    alignItems: 'center',
+  },
+  rmDropHint: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 11,
+    fontWeight: 500,
+    color: 'rgba(255,255,255,0.2)',
+    fontStyle: 'italic',
+  },
+  rmDropGlow: {
+    borderColor: 'rgba(78,205,196,0.6)',
+    background: 'rgba(78,205,196,0.08)',
+    boxShadow: '0 0 0 2px rgba(78,205,196,0.2)',
+  },
+  rmEmpty: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 12,
+    fontWeight: 500,
+    color: 'rgba(255,255,255,0.2)',
+    textAlign: 'center',
+    margin: '12px 0',
+    width: '100%',
+  },
   studentGalTitle: {
     fontFamily: "'Lilita One', cursive",
     fontSize: 17,
@@ -796,10 +1332,20 @@ const st = {
     fontFamily: "'Fredoka', sans-serif",
     fontSize: 14,
     fontWeight: 700,
-    padding: '8px 20px',
+    padding: '8px 16px',
     borderRadius: 14,
     cursor: 'pointer',
     transition: 'all 0.15s ease',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 2,
+    flex: 1,
+  },
+  modelHint: {
+    fontSize: 10,
+    fontWeight: 500,
+    opacity: 0.6,
   },
   generateBtn: {
     fontFamily: "'Lilita One', cursive",
