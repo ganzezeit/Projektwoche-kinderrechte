@@ -4,6 +4,7 @@ import { ref, set, onValue, remove, push } from 'firebase/database';
 import { db } from '../firebase';
 
 const API_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/generate-image';
+const VIDEO_API_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/generate-video';
 const POLL_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/poll-image';
 
 function generateCode() {
@@ -38,6 +39,11 @@ const UI = {
     pause: 'Pausieren',
     resume: 'Fortsetzen',
     by: 'von',
+    videoPlaceholder: 'Beschreibe dein Video...',
+    videoGenerate: 'Video erstellen!',
+    videoLoading: 'KI erstellt dein Video... Dies kann bis zu 2 Minuten dauern',
+    videoGallery: 'Deine Videos',
+    videoDisabled: 'Video-Erstellung ist in diesem Raum nicht aktiviert.',
   },
   en: {
     title: 'AI Art Studio',
@@ -58,6 +64,11 @@ const UI = {
     pause: 'Pause',
     resume: 'Resume',
     by: 'by',
+    videoPlaceholder: 'Describe your video...',
+    videoGenerate: 'Create Video!',
+    videoLoading: 'AI is creating your video... This can take up to 2 minutes',
+    videoGallery: 'Your Videos',
+    videoDisabled: 'Video creation is not enabled in this room.',
   },
   tr: {
     title: 'Yapay Zeka Sanat Stüdyosu',
@@ -78,6 +89,11 @@ const UI = {
     pause: 'Duraklat',
     resume: 'Devam Et',
     by: '\u2013',
+    videoPlaceholder: 'Videonuzu tarif edin...',
+    videoGenerate: 'Video Oluştur!',
+    videoLoading: 'Yapay zeka videonuzu oluşturuyor... Bu 2 dakika sürebilir',
+    videoGallery: 'Videolarınız',
+    videoDisabled: 'Bu odada video oluşturma etkin değil.',
   },
   sw: {
     title: 'Studio ya Sanaa ya AI',
@@ -98,6 +114,11 @@ const UI = {
     pause: 'Simamisha',
     resume: 'Endelea',
     by: 'na',
+    videoPlaceholder: 'Eleza video yako...',
+    videoGenerate: 'Tengeneza Video!',
+    videoLoading: 'AI inaunda video yako...',
+    videoGallery: 'Video Zako',
+    videoDisabled: 'Utengenezaji wa video haujawezeshwa.',
   },
   fr: {
     title: 'Studio d\'Art IA',
@@ -118,6 +139,11 @@ const UI = {
     pause: 'Pause',
     resume: 'Reprendre',
     by: 'par',
+    videoPlaceholder: 'Décrivez votre vidéo...',
+    videoGenerate: 'Créer la vidéo !',
+    videoLoading: 'L\'IA crée votre vidéo... Cela peut prendre 2 minutes',
+    videoGallery: 'Vos Vidéos',
+    videoDisabled: 'La création de vidéos n\'est pas activée.',
   },
 };
 
@@ -150,10 +176,24 @@ export default function ArtStudio({ onClose, initialMode }) {
   const [previewImg, setPreviewImg] = useState(null);
   const progressRef = useRef(null);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState('image');
+
+  // Video state
+  const [vPrompt, setVPrompt] = useState('');
+  const [vModel, setVModel] = useState('schnell');
+  const [vGenerating, setVGenerating] = useState(false);
+  const [vResult, setVResult] = useState(null);
+  const [vError, setVError] = useState(null);
+  const [vGallery, setVGallery] = useState([]);
+  const [vElapsed, setVElapsed] = useState(0);
+  const vElapsedRef = useRef(null);
+
   // Room state
   const [roomCode, setRoomCode] = useState(() => localStorage.getItem('artroom-teacher-code') || '');
   const [room, setRoom] = useState(null);
   const [studentImages, setStudentImages] = useState([]);
+  const [studentVideos, setStudentVideos] = useState([]);
   const [showRoom, setShowRoom] = useState(initialMode === 'room');
 
   // Multi-room state
@@ -161,6 +201,7 @@ export default function ArtStudio({ onClose, initialMode }) {
   const [studios, setStudios] = useState([]);
   const [dragOverTarget, setDragOverTarget] = useState(null);
   const [studioMenuOpen, setStudioMenuOpen] = useState(null);
+  const [expandedStudio, setExpandedStudio] = useState(null);
   const dragItemRef = useRef(null);
   const touchCloneRef = useRef(null);
   const touchStartRef = useRef(null);
@@ -207,6 +248,20 @@ export default function ArtStudio({ onClose, initialMode }) {
     return () => unsub();
   }, [roomCode]);
 
+  // Subscribe to student videos
+  useEffect(() => {
+    if (!roomCode) { setStudentVideos([]); return; }
+    const vidsRef = ref(db, 'artRooms/' + roomCode + '/videos');
+    const unsub = onValue(vidsRef, (snap) => {
+      const data = snap.val();
+      if (!data) { setStudentVideos([]); return; }
+      const list = Object.entries(data).map(([k, v]) => ({ id: k, ...v }));
+      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      setStudentVideos(list);
+    });
+    return () => unsub();
+  }, [roomCode]);
+
   // Fake progress bar
   useEffect(() => {
     if (!generating) { setProgress(0); return; }
@@ -238,6 +293,7 @@ export default function ArtStudio({ onClose, initialMode }) {
       setStudios(d ? Object.entries(d).map(([id, v]) => ({
         id, name: v.name,
         allowedModels: v.allowedModels || ['schnell', 'quality'],
+        videoEnabled: v.videoEnabled || false,
         participants: v.participants
           ? (Array.isArray(v.participants) ? v.participants : Object.values(v.participants))
           : [],
@@ -310,6 +366,18 @@ export default function ArtStudio({ onClose, initialMode }) {
       updated = [...current, modelKey];
     }
     await set(ref(db, 'artRooms/' + roomCode + '/studios/' + studioId + '/allowedModels'), updated);
+  };
+
+  const handleToggleStudioVideo = async (studioId) => {
+    if (!roomCode) return;
+    const studio = studios.find(s => s.id === studioId);
+    if (!studio) return;
+    await set(ref(db, 'artRooms/' + roomCode + '/studios/' + studioId + '/videoEnabled'), !studio.videoEnabled);
+  };
+
+  const handleDeleteVideo = async (vidId) => {
+    if (!roomCode) return;
+    await remove(ref(db, 'artRooms/' + roomCode + '/videos/' + vidId));
   };
 
   // === HTML5 Drag & Drop ===
@@ -521,6 +589,116 @@ export default function ArtStudio({ onClose, initialMode }) {
     handleGenerate();
   };
 
+  // Video elapsed timer
+  useEffect(() => {
+    if (!vGenerating) { setVElapsed(0); if (vElapsedRef.current) clearInterval(vElapsedRef.current); return; }
+    setVElapsed(0);
+    const start = Date.now();
+    vElapsedRef.current = setInterval(() => setVElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => { if (vElapsedRef.current) clearInterval(vElapsedRef.current); };
+  }, [vGenerating]);
+
+  const handleVideoGenerate = useCallback(async () => {
+    if (!vPrompt.trim() || vGenerating) return;
+    setVGenerating(true);
+    setVResult(null);
+    setVError(null);
+
+    try {
+      const res = await fetch(VIDEO_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: vPrompt.trim(), model: vModel }),
+      });
+
+      let data;
+      try { data = await res.json(); } catch {
+        setVError(`HTTP ${res.status}`);
+        setVGenerating(false);
+        return;
+      }
+
+      if (!res.ok) {
+        if (data.error === 'unsafe') setVError('unsafe');
+        else setVError(data.details || data.error || `HTTP ${res.status}`);
+        setVGenerating(false);
+        return;
+      }
+
+      // Direct result (unlikely for video)
+      if (data.videoUrl) {
+        setVResult(data);
+        setVGallery(prev => [{ ...data, timestamp: Date.now() }, ...prev]);
+        setVGenerating(false);
+        return;
+      }
+
+      // Async polling
+      if (data.status === 'processing' && data.pollUrl) {
+        const maxPolls = 90; // 3 minutes
+        let polls = 0;
+        while (polls < maxPolls) {
+          await new Promise(r => setTimeout(r, 2000));
+          polls++;
+          try {
+            const pollRes = await fetch(POLL_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pollUrl: data.pollUrl }),
+            });
+            const pollData = await pollRes.json();
+            if (pollData.status === 'succeeded' && pollData.imageUrl) {
+              const finalData = { videoUrl: pollData.imageUrl, enhancedPrompt: data.enhancedPrompt, originalPrompt: data.originalPrompt };
+              setVResult(finalData);
+              setVGallery(prev => [{ ...finalData, timestamp: Date.now() }, ...prev]);
+              setVGenerating(false);
+              return;
+            }
+            if (pollData.status === 'failed') {
+              setVError(pollData.error || 'Videogenerierung fehlgeschlagen');
+              setVGenerating(false);
+              return;
+            }
+          } catch { /* keep trying */ }
+        }
+        setVError('Zeitüberschreitung - bitte erneut versuchen');
+        setVGenerating(false);
+        return;
+      }
+
+      setVError('Unerwartete Antwort vom Server');
+    } catch (err) {
+      setVError(`Netzwerkfehler: ${err.message}`);
+    }
+    setVGenerating(false);
+  }, [vPrompt, vModel, vGenerating]);
+
+  const handleVideoDownload = useCallback(async () => {
+    if (!vResult?.videoUrl) return;
+    try {
+      const resp = await fetch(vResult.videoUrl);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ki-video-${Date.now()}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      window.open(vResult.videoUrl, '_blank');
+    }
+  }, [vResult]);
+
+  const handleVideoRetry = () => {
+    setVResult(null);
+    setVError(null);
+    handleVideoGenerate();
+  };
+
+  const formatTime = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+
   const roomUrl = roomCode ? `${window.location.origin}/art/${roomCode}` : '';
   const isPaused = room && room.settings?.imageEnabled === false;
 
@@ -547,6 +725,20 @@ export default function ArtStudio({ onClose, initialMode }) {
           </div>
         </div>
 
+        {/* Tabs - only show when not in room view */}
+        {!showRoom && (
+          <div style={st.tabRow}>
+            <button
+              onClick={() => setActiveTab('image')}
+              style={{ ...st.tabBtn, ...(activeTab === 'image' ? st.tabActive : {}) }}
+            >{'\u{1F3A8}'} Bild</button>
+            <button
+              onClick={() => setActiveTab('video')}
+              style={{ ...st.tabBtn, ...(activeTab === 'video' ? st.tabActive : {}) }}
+            >{'\u{1F3AC}'} Video</button>
+          </div>
+        )}
+
         <div style={st.body}>
           {/* Room panel (teacher view) */}
           {showRoom && roomCode && room?.active && (
@@ -565,6 +757,17 @@ export default function ArtStudio({ onClose, initialMode }) {
                       color: isPaused ? '#4ECDC4' : '#FFE66D',
                     }}>
                       {isPaused ? '\u25B6\uFE0F ' + t.resume : '\u23F8\uFE0F ' + t.pause}
+                    </button>
+                    <button onClick={async () => {
+                      if (!roomCode || !room) return;
+                      const current = room.settings?.videoEnabled === true;
+                      await set(ref(db, 'artRooms/' + roomCode + '/settings/videoEnabled'), !current);
+                    }} style={{
+                      ...st.roomCtrlBtn,
+                      background: room?.settings?.videoEnabled ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.08)',
+                      color: room?.settings?.videoEnabled ? '#A78BFA' : 'rgba(255,255,255,0.4)',
+                    }}>
+                      {'\u{1F3AC}'} Video {room?.settings?.videoEnabled ? 'AN' : 'AUS'}
                     </button>
                     <button onClick={handleCloseRoom} style={st.closeRoomBtn}>
                       {'\u2715'} {t.closeRoom}
@@ -660,7 +863,7 @@ export default function ArtStudio({ onClose, initialMode }) {
                             )}
                           </div>
                         </div>
-                        {/* Model toggles for this studio */}
+                        {/* Model + video toggles for this studio */}
                         <div style={st.rmModelRow}>
                           {[
                             { key: 'schnell', label: '\u26A1', color: '#4ECDC4' },
@@ -683,6 +886,32 @@ export default function ArtStudio({ onClose, initialMode }) {
                               </button>
                             );
                           })}
+                          <button
+                            onClick={() => handleToggleStudioVideo(studio.id)}
+                            style={{
+                              ...st.rmModelToggle,
+                              background: studio.videoEnabled ? 'rgba(255,107,107,0.3)' : 'rgba(255,255,255,0.05)',
+                              border: studio.videoEnabled ? '1px solid #FF6B6B' : '1px solid rgba(255,255,255,0.1)',
+                              color: studio.videoEnabled ? '#FF6B6B' : 'rgba(255,255,255,0.2)',
+                            }}
+                            title="Video"
+                          >
+                            {'\u{1F3AC}'}
+                          </button>
+                          {/* Expand/gallery button */}
+                          <button
+                            onClick={() => setExpandedStudio(expandedStudio === studio.id ? null : studio.id)}
+                            style={{
+                              ...st.rmModelToggle,
+                              marginLeft: 'auto',
+                              background: expandedStudio === studio.id ? 'rgba(255,230,109,0.3)' : 'rgba(255,255,255,0.05)',
+                              border: expandedStudio === studio.id ? '1px solid #FFE66D' : '1px solid rgba(255,255,255,0.1)',
+                              color: expandedStudio === studio.id ? '#FFE66D' : 'rgba(255,255,255,0.2)',
+                            }}
+                            title="Galerie"
+                          >
+                            {'\u{1F5BC}\uFE0F'}
+                          </button>
                         </div>
                         {/* Participant cards */}
                         <div style={st.rmRoomCards}>
@@ -702,33 +931,99 @@ export default function ArtStudio({ onClose, initialMode }) {
                             </div>
                           ))}
                         </div>
+                        {/* Expanded studio gallery */}
+                        {expandedStudio === studio.id && (() => {
+                          const names = new Set(studio.participants.map(p => p.name));
+                          const sImgs = studentImages.filter(img => names.has(img.author));
+                          const sVids = studentVideos.filter(v => names.has(v.author));
+                          return (
+                            <div style={st.studioGalleryWrap}>
+                              {sImgs.length === 0 && sVids.length === 0 && (
+                                <p style={st.rmEmpty}>Noch keine Werke in diesem Raum</p>
+                              )}
+                              {sImgs.length > 0 && (
+                                <>
+                                  <div style={st.studioGalLabel}>{'\u{1F5BC}\uFE0F'} Bilder ({sImgs.length})</div>
+                                  <div style={st.studioGalGrid}>
+                                    {sImgs.map(img => (
+                                      <div key={img.id} style={st.studioGalCard}>
+                                        <img src={img.imageUrl} alt={img.prompt} style={st.studioGalImg} onClick={() => setPreviewImg(img)} />
+                                        <div style={st.studioGalMeta}>
+                                          <span style={st.studioGalAuthor}>{img.author}</span>
+                                          <button onClick={() => handleDeleteImage(img.id)} style={st.deleteImgBtn} title="Löschen">{'\u{1F5D1}\uFE0F'}</button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                              {sVids.length > 0 && (
+                                <>
+                                  <div style={st.studioGalLabel}>{'\u{1F3AC}'} Videos ({sVids.length})</div>
+                                  <div style={st.studioGalGrid}>
+                                    {sVids.map(v => (
+                                      <div key={v.id} style={st.studioGalCard}>
+                                        <video src={v.videoUrl} style={st.studioGalImg} controls muted playsInline />
+                                        <div style={st.studioGalMeta}>
+                                          <span style={st.studioGalAuthor}>{v.author}</span>
+                                          <button onClick={() => handleDeleteVideo(v.id)} style={st.deleteImgBtn} title="Löschen">{'\u{1F5D1}\uFE0F'}</button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
 
-              {/* Student images */}
-              <div style={st.studentGalTitle}>{t.studentGallery} ({studentImages.length})</div>
-              {studentImages.length === 0 && (
+              {/* All student works */}
+              <div style={st.studentGalTitle}>{t.studentGallery} ({studentImages.length + studentVideos.length})</div>
+              {studentImages.length === 0 && studentVideos.length === 0 && (
                 <div style={st.noImagesText}>{t.noImages}</div>
               )}
-              <div style={st.studentGalGrid}>
-                {studentImages.map(img => (
-                  <div key={img.id} style={st.studentGalCard}>
-                    <img src={img.imageUrl} alt={img.prompt} style={st.studentGalImg} onClick={() => setPreviewImg(img)} />
-                    <div style={st.studentGalMeta}>
-                      <span style={st.studentGalAuthor}>{img.author}</span>
-                      <button onClick={() => handleDeleteImage(img.id)} style={st.deleteImgBtn} title="Löschen">{'\u{1F5D1}\uFE0F'}</button>
-                    </div>
+              {studentImages.length > 0 && (
+                <>
+                  <div style={st.studentGalSubtitle}>{'\u{1F5BC}\uFE0F'} Bilder ({studentImages.length})</div>
+                  <div style={st.studentGalGrid}>
+                    {studentImages.map(img => (
+                      <div key={img.id} style={st.studentGalCard}>
+                        <img src={img.imageUrl} alt={img.prompt} style={st.studentGalImg} onClick={() => setPreviewImg(img)} />
+                        <div style={st.studentGalMeta}>
+                          <span style={st.studentGalAuthor}>{img.author}</span>
+                          <button onClick={() => handleDeleteImage(img.id)} style={st.deleteImgBtn} title="Löschen">{'\u{1F5D1}\uFE0F'}</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              )}
+              {studentVideos.length > 0 && (
+                <>
+                  <div style={{ ...st.studentGalSubtitle, marginTop: 12 }}>{'\u{1F3AC}'} Videos ({studentVideos.length})</div>
+                  <div style={st.studentGalGrid}>
+                    {studentVideos.map(v => (
+                      <div key={v.id} style={st.studentGalCard}>
+                        <video src={v.videoUrl} style={st.studentGalImg} controls muted playsInline />
+                        <div style={st.studentGalMeta}>
+                          <span style={st.studentGalAuthor}>{v.author}</span>
+                          <button onClick={() => handleDeleteVideo(v.id)} style={st.deleteImgBtn} title="Löschen">{'\u{1F5D1}\uFE0F'}</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {/* Teacher's own generation UI */}
-          {!showRoom && (
+          {/* Teacher's own generation UI - IMAGE TAB */}
+          {!showRoom && activeTab === 'image' && (
             <>
               {/* Prompt input */}
               <div style={st.promptWrap}>
@@ -864,6 +1159,126 @@ export default function ArtStudio({ onClose, initialMode }) {
               )}
             </>
           )}
+
+          {/* VIDEO TAB */}
+          {!showRoom && activeTab === 'video' && (
+            <>
+              <div style={st.promptWrap}>
+                <textarea
+                  value={vPrompt}
+                  onChange={e => setVPrompt(e.target.value.slice(0, 500))}
+                  placeholder={t.videoPlaceholder}
+                  style={st.textarea}
+                  maxLength={500}
+                  rows={3}
+                />
+                <div style={st.charCount}>{vPrompt.length}/500 {t.chars}</div>
+              </div>
+
+              {/* Video model selector */}
+              <div style={st.modelRow}>
+                <button
+                  onClick={() => setVModel('schnell')}
+                  style={{
+                    ...st.modelBtn,
+                    background: vModel === 'schnell' ? 'rgba(78,205,196,0.2)' : 'rgba(255,255,255,0.05)',
+                    border: vModel === 'schnell' ? '2px solid rgba(78,205,196,0.5)' : '2px solid rgba(255,255,255,0.1)',
+                    color: vModel === 'schnell' ? '#4ECDC4' : 'rgba(255,255,255,0.5)',
+                    boxShadow: vModel === 'schnell' ? '0 0 12px rgba(78,205,196,0.3)' : 'none',
+                  }}
+                >
+                  <span>{'\u26A1'} Schnell</span>
+                  <span style={st.modelHint}>~30 Sek.</span>
+                </button>
+                <button
+                  onClick={() => setVModel('quality')}
+                  style={{
+                    ...st.modelBtn,
+                    background: vModel === 'quality' ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
+                    border: vModel === 'quality' ? '2px solid rgba(167,139,250,0.5)' : '2px solid rgba(255,255,255,0.1)',
+                    color: vModel === 'quality' ? '#A78BFA' : 'rgba(255,255,255,0.5)',
+                    boxShadow: vModel === 'quality' ? '0 0 12px rgba(167,139,250,0.3)' : 'none',
+                  }}
+                >
+                  <span>{'\u2728'} Qualität</span>
+                  <span style={st.modelHint}>~60 Sek.</span>
+                </button>
+              </div>
+
+              {/* Generate video button */}
+              <button
+                onClick={handleVideoGenerate}
+                disabled={!vPrompt.trim() || vGenerating}
+                style={{
+                  ...st.generateBtn,
+                  background: 'linear-gradient(90deg, #A78BFA, #FF6B6B, #FFE66D, #4ECDC4, #A78BFA)',
+                  backgroundSize: '200% 100%',
+                  opacity: (!vPrompt.trim() || vGenerating) ? 0.5 : 1,
+                  cursor: (!vPrompt.trim() || vGenerating) ? 'default' : 'pointer',
+                }}
+              >
+                {'\u{1F3AC}'} {vGenerating ? t.videoLoading : t.videoGenerate}
+              </button>
+
+              {/* Video loading with elapsed time */}
+              {vGenerating && (
+                <div style={st.loadingWrap}>
+                  <div style={{ fontSize: 48, animation: 'artPulse 1.5s ease-in-out infinite' }}>{'\u{1F3AC}'}</div>
+                  <div style={st.loadingText}>{t.videoLoading}</div>
+                  <div style={st.elapsedTimer}>{'\u23F1\uFE0F'} {formatTime(vElapsed)}</div>
+                  <div style={st.elapsedHint}>
+                    {vElapsed < 15 ? 'Prompt wird verbessert...' :
+                     vElapsed < 30 ? 'Video wird generiert...' :
+                     vElapsed < 60 ? 'Noch einen Moment...' :
+                     'Fast fertig... Bitte warten'}
+                  </div>
+                </div>
+              )}
+
+              {/* Video error */}
+              {vError && !vGenerating && (
+                <div style={st.errorBox}>
+                  {vError === 'unsafe' ? t.unsafe : vError}
+                </div>
+              )}
+
+              {/* Video result */}
+              {vResult && !vGenerating && (
+                <div style={st.resultWrap}>
+                  <video
+                    src={vResult.videoUrl}
+                    controls
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    style={st.resultVideo}
+                  />
+                  <div style={st.resultActions}>
+                    <button onClick={handleVideoDownload} style={st.actionBtn}>{'\u{1F4BE}'} {t.save}</button>
+                    <button onClick={handleVideoRetry} style={st.actionBtn}>{'\u{1F504}'} {t.retry}</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Video gallery */}
+              {vGallery.length > 0 && (
+                <div style={st.gallerySection}>
+                  <h3 style={st.galTitle}>{t.videoGallery}</h3>
+                  <div style={st.galGrid}>
+                    {vGallery.map((v, i) => (
+                      <div key={i} style={st.galThumb}>
+                        <video src={v.videoUrl} style={st.galImg} muted playsInline loop
+                          onMouseEnter={e => e.target.play()}
+                          onMouseLeave={e => { e.target.pause(); e.target.currentTime = 0; }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Full-size preview */}
@@ -955,6 +1370,31 @@ const st = {
     cursor: 'pointer',
     color: 'white',
     whiteSpace: 'nowrap',
+  },
+  tabRow: {
+    display: 'flex',
+    gap: 0,
+    padding: '0 20px',
+    flexShrink: 0,
+    borderBottom: '1px solid rgba(255,255,255,0.08)',
+  },
+  tabBtn: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 15,
+    fontWeight: 700,
+    padding: '10px 20px',
+    border: 'none',
+    borderBottom: '3px solid transparent',
+    background: 'none',
+    color: 'rgba(255,255,255,0.4)',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    flex: 1,
+    textAlign: 'center',
+  },
+  tabActive: {
+    color: 'white',
+    borderBottomColor: '#A78BFA',
   },
   body: {
     flex: 1,
@@ -1224,6 +1664,56 @@ const st = {
     textAlign: 'center',
     padding: '20px 0',
   },
+  studentGalSubtitle: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 700,
+    color: 'rgba(255,255,255,0.4)',
+    marginBottom: 6,
+  },
+  studioGalleryWrap: {
+    marginTop: 8,
+    padding: '8px 0 0',
+    borderTop: '1px solid rgba(255,255,255,0.08)',
+  },
+  studioGalLabel: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 12,
+    fontWeight: 700,
+    color: 'rgba(255,255,255,0.4)',
+    marginBottom: 6,
+  },
+  studioGalGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))',
+    gap: 6,
+    marginBottom: 8,
+  },
+  studioGalCard: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(255,255,255,0.03)',
+  },
+  studioGalImg: {
+    width: '100%',
+    aspectRatio: '1',
+    objectFit: 'cover',
+    display: 'block',
+    cursor: 'pointer',
+  },
+  studioGalMeta: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '2px 6px',
+  },
+  studioGalAuthor: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 10,
+    fontWeight: 700,
+    color: 'rgba(255,255,255,0.4)',
+  },
   studentGalGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
@@ -1414,6 +1904,25 @@ const st = {
     objectFit: 'contain',
     borderRadius: 16,
     boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+  },
+  resultVideo: {
+    width: '100%',
+    maxHeight: '50vh',
+    borderRadius: 16,
+    boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+    background: '#000',
+  },
+  elapsedTimer: {
+    fontFamily: "'Baloo 2', cursive",
+    fontSize: 28,
+    fontWeight: 700,
+    color: '#A78BFA',
+  },
+  elapsedHint: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 500,
+    color: 'rgba(255,255,255,0.4)',
   },
   resultActions: {
     display: 'flex',

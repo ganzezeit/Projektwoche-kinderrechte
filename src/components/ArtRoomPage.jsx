@@ -3,6 +3,7 @@ import { ref, onValue, push, set } from 'firebase/database';
 import { db } from '../firebase';
 
 const API_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/generate-image';
+const VIDEO_API_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/generate-video';
 const POLL_URL = 'https://harmonious-taffy-89ea6b.netlify.app/.netlify/functions/poll-image';
 
 const DEVICE_LANG = (() => {
@@ -25,6 +26,10 @@ const UI = {
     paused: 'Bildgenerierung ist gerade pausiert.',
     chars: 'Zeichen',
     by: 'von',
+    videoPlaceholder: 'Beschreibe dein Video...',
+    videoGenerate: 'Video erstellen!',
+    videoLoading: 'KI erstellt dein Video... Dies kann bis zu 2 Minuten dauern',
+    videoDisabled: 'Video-Erstellung ist in diesem Raum nicht aktiviert.',
   },
   en: {
     title: 'AI Art Studio',
@@ -40,6 +45,10 @@ const UI = {
     paused: 'Image generation is currently paused.',
     chars: 'chars',
     by: 'by',
+    videoPlaceholder: 'Describe your video...',
+    videoGenerate: 'Create Video!',
+    videoLoading: 'AI is creating your video... This can take up to 2 minutes',
+    videoDisabled: 'Video creation is not enabled in this room.',
   },
   tr: {
     title: 'Yapay Zeka Sanat Stüdyosu',
@@ -55,6 +64,10 @@ const UI = {
     paused: 'Resim oluşturma şu anda duraklatıldı.',
     chars: 'karakter',
     by: '\u2013',
+    videoPlaceholder: 'Videonuzu tarif edin...',
+    videoGenerate: 'Video Oluştur!',
+    videoLoading: 'Yapay zeka videonuzu oluşturuyor... Bu 2 dakika sürebilir',
+    videoDisabled: 'Bu odada video oluşturma etkin değil.',
   },
   sw: {
     title: 'Studio ya Sanaa ya AI',
@@ -70,6 +83,10 @@ const UI = {
     paused: 'Utengenezaji wa picha umesimamishwa kwa sasa.',
     chars: 'herufi',
     by: 'na',
+    videoPlaceholder: 'Eleza video yako...',
+    videoGenerate: 'Tengeneza Video!',
+    videoLoading: 'AI inaunda video yako...',
+    videoDisabled: 'Utengenezaji wa video haujawezeshwa.',
   },
   fr: {
     title: 'Studio d\'Art IA',
@@ -85,6 +102,10 @@ const UI = {
     paused: 'La génération d\'images est actuellement en pause.',
     chars: 'caractères',
     by: 'par',
+    videoPlaceholder: 'Décrivez votre vidéo...',
+    videoGenerate: 'Créer la vidéo !',
+    videoLoading: 'L\'IA crée votre vidéo... Cela peut prendre 2 minutes',
+    videoDisabled: 'La création de vidéos n\'est pas activée.',
   },
 };
 
@@ -121,6 +142,16 @@ export default function ArtRoomPage({ code }) {
   const [sharedGallery, setSharedGallery] = useState([]);
   const [previewImg, setPreviewImg] = useState(null);
   const progressRef = useRef(null);
+
+  // Tab + video state
+  const [activeTab, setActiveTab] = useState('image');
+  const [vPrompt, setVPrompt] = useState('');
+  const [vModel, setVModel] = useState('schnell');
+  const [vGenerating, setVGenerating] = useState(false);
+  const [vError, setVError] = useState(null);
+  const [vElapsed, setVElapsed] = useState(0);
+  const vElapsedRef = useRef(null);
+  const [sharedVideos, setSharedVideos] = useState([]);
 
   // Multi-room state
   const [studios, setStudios] = useState([]);
@@ -184,6 +215,28 @@ export default function ArtRoomPage({ code }) {
     return () => { if (progressRef.current) clearInterval(progressRef.current); };
   }, [generating, selectedModel]);
 
+  // Subscribe to shared videos
+  useEffect(() => {
+    const vidsRef = ref(db, 'artRooms/' + code + '/videos');
+    const unsub = onValue(vidsRef, (snap) => {
+      const data = snap.val();
+      if (!data) { setSharedVideos([]); return; }
+      const list = Object.entries(data).map(([k, v]) => ({ id: k, ...v }));
+      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      setSharedVideos(list);
+    });
+    return () => unsub();
+  }, [code]);
+
+  // Video elapsed timer
+  useEffect(() => {
+    if (!vGenerating) { setVElapsed(0); if (vElapsedRef.current) clearInterval(vElapsedRef.current); return; }
+    setVElapsed(0);
+    const start = Date.now();
+    vElapsedRef.current = setInterval(() => setVElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => { if (vElapsedRef.current) clearInterval(vElapsedRef.current); };
+  }, [vGenerating]);
+
   // Subscribe to studios (sub-rooms)
   useEffect(() => {
     const u = onValue(ref(db, 'artRooms/' + code + '/studios'), snap => {
@@ -191,6 +244,7 @@ export default function ArtRoomPage({ code }) {
       setStudios(d ? Object.entries(d).map(([id, v]) => ({
         id, name: v.name,
         allowedModels: v.allowedModels || ['schnell', 'quality'],
+        videoEnabled: v.videoEnabled || false,
         participants: v.participants
           ? (Array.isArray(v.participants) ? v.participants : Object.values(v.participants))
           : [],
@@ -330,6 +384,90 @@ export default function ArtRoomPage({ code }) {
     setGenerating(false);
   }, [prompt, selectedStyle, selectedRatio, selectedModel, generating, code, author]);
 
+  const handleVideoGenerate = useCallback(async () => {
+    if (!vPrompt.trim() || vGenerating) return;
+    setVGenerating(true);
+    setVError(null);
+
+    try {
+      const res = await fetch(VIDEO_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: vPrompt.trim(), model: vModel }),
+      });
+
+      let data;
+      try { data = await res.json(); } catch {
+        setVError(`HTTP ${res.status}`);
+        setVGenerating(false);
+        return;
+      }
+
+      if (!res.ok) {
+        if (data.error === 'unsafe') setVError('unsafe');
+        else setVError(data.details || data.error || `HTTP ${res.status}`);
+        setVGenerating(false);
+        return;
+      }
+
+      let finalVideoUrl = data.videoUrl;
+
+      // Async polling
+      if (!finalVideoUrl && data.status === 'processing' && data.pollUrl) {
+        const maxPolls = 90;
+        let polls = 0;
+        let done = false;
+        while (polls < maxPolls && !done) {
+          await new Promise(r => setTimeout(r, 2000));
+          polls++;
+          try {
+            const pollRes = await fetch(POLL_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pollUrl: data.pollUrl }),
+            });
+            const pollData = await pollRes.json();
+            if (pollData.status === 'succeeded' && pollData.imageUrl) {
+              finalVideoUrl = pollData.imageUrl;
+              done = true;
+            } else if (pollData.status === 'failed') {
+              setVError(pollData.error || 'Videogenerierung fehlgeschlagen');
+              setVGenerating(false);
+              return;
+            }
+          } catch { /* keep trying */ }
+        }
+        if (!done) {
+          setVError('Zeitüberschreitung - bitte erneut versuchen');
+          setVGenerating(false);
+          return;
+        }
+      }
+
+      if (!finalVideoUrl) {
+        setVError('Unerwartete Antwort vom Server');
+        setVGenerating(false);
+        return;
+      }
+
+      // Save to Firebase
+      await push(ref(db, 'artRooms/' + code + '/videos'), {
+        videoUrl: finalVideoUrl,
+        prompt: vPrompt.trim(),
+        enhancedPrompt: data.enhancedPrompt || '',
+        author,
+        createdAt: Date.now(),
+      });
+
+      setVPrompt('');
+    } catch (err) {
+      setVError(err.message);
+    }
+    setVGenerating(false);
+  }, [vPrompt, vModel, vGenerating, code, author]);
+
+  const formatTime = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+
   // Loading
   if (loading) {
     return (
@@ -395,6 +533,9 @@ export default function ArtRoomPage({ code }) {
   }
 
   const isPaused = room && room.settings && !room.settings.imageEnabled;
+  const videoEnabled = assignedStudio
+    ? assignedStudio.videoEnabled === true
+    : room?.settings?.videoEnabled === true;
 
   // Main studio
   return (
@@ -406,15 +547,32 @@ export default function ArtRoomPage({ code }) {
           <span style={st.authorBadge}>{author}</span>
         </div>
 
-        {/* Generation paused */}
-        {isPaused && (
-          <div style={st.pausedBox}>{'\u23F8\uFE0F'} {t.paused}</div>
+        {/* Tabs - only show if video is enabled */}
+        {videoEnabled && (
+          <div style={st.tabRow}>
+            <button
+              onClick={() => setActiveTab('image')}
+              style={{ ...st.tabBtn, ...(activeTab === 'image' ? st.tabActive : {}) }}
+            >{'\u{1F3A8}'} Bild</button>
+            <button
+              onClick={() => setActiveTab('video')}
+              style={{ ...st.tabBtn, ...(activeTab === 'video' ? st.tabActive : {}) }}
+            >{'\u{1F3AC}'} Video</button>
+          </div>
         )}
 
-        {/* Prompt + controls */}
-        {!isPaused && (
+        {/* IMAGE TAB */}
+        {activeTab === 'image' && (
           <>
-            <div style={st.promptWrap}>
+            {/* Generation paused */}
+            {isPaused && (
+              <div style={st.pausedBox}>{'\u23F8\uFE0F'} {t.paused}</div>
+            )}
+
+            {/* Prompt + controls */}
+            {!isPaused && (
+              <>
+                <div style={st.promptWrap}>
               <textarea
                 value={prompt}
                 onChange={e => setPrompt(e.target.value.slice(0, 500))}
@@ -524,7 +682,7 @@ export default function ArtRoomPage({ code }) {
           </>
         )}
 
-        {/* Shared gallery */}
+        {/* Image shared gallery */}
         {sharedGallery.length > 0 && (
           <div style={st.gallerySection}>
             <h3 style={st.galTitle}>{t.gallery} ({sharedGallery.length})</h3>
@@ -540,6 +698,110 @@ export default function ArtRoomPage({ code }) {
             </div>
           </div>
         )}
+          </>
+        )}
+
+        {/* VIDEO TAB */}
+        {activeTab === 'video' && videoEnabled && (
+          <>
+            <div style={st.promptWrap}>
+              <textarea
+                value={vPrompt}
+                onChange={e => setVPrompt(e.target.value.slice(0, 500))}
+                placeholder={t.videoPlaceholder}
+                style={st.textarea}
+                maxLength={500}
+                rows={3}
+              />
+              <div style={st.charCount}>{vPrompt.length}/500 {t.chars}</div>
+            </div>
+
+            <div style={st.modelRow}>
+              <button
+                onClick={() => setVModel('schnell')}
+                style={{
+                  ...st.modelBtn,
+                  background: vModel === 'schnell' ? 'rgba(78,205,196,0.2)' : 'rgba(255,255,255,0.05)',
+                  border: vModel === 'schnell' ? '2px solid rgba(78,205,196,0.5)' : '2px solid rgba(255,255,255,0.1)',
+                  color: vModel === 'schnell' ? '#4ECDC4' : 'rgba(255,255,255,0.5)',
+                  boxShadow: vModel === 'schnell' ? '0 0 12px rgba(78,205,196,0.3)' : 'none',
+                }}
+              >
+                <span>{'\u26A1'} Schnell</span>
+                <span style={st.modelHint}>~30 Sek.</span>
+              </button>
+              <button
+                onClick={() => setVModel('quality')}
+                style={{
+                  ...st.modelBtn,
+                  background: vModel === 'quality' ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
+                  border: vModel === 'quality' ? '2px solid rgba(167,139,250,0.5)' : '2px solid rgba(255,255,255,0.1)',
+                  color: vModel === 'quality' ? '#A78BFA' : 'rgba(255,255,255,0.5)',
+                  boxShadow: vModel === 'quality' ? '0 0 12px rgba(167,139,250,0.3)' : 'none',
+                }}
+              >
+                <span>{'\u2728'} Qualität</span>
+                <span style={st.modelHint}>~60 Sek.</span>
+              </button>
+            </div>
+
+            <button
+              onClick={handleVideoGenerate}
+              disabled={!vPrompt.trim() || vGenerating}
+              style={{
+                ...st.generateBtn,
+                background: 'linear-gradient(90deg, #A78BFA, #FF6B6B, #FFE66D, #4ECDC4, #A78BFA)',
+                backgroundSize: '200% 100%',
+                opacity: (!vPrompt.trim() || vGenerating) ? 0.5 : 1,
+                cursor: (!vPrompt.trim() || vGenerating) ? 'default' : 'pointer',
+              }}
+            >
+              {'\u{1F3AC}'} {vGenerating ? t.videoLoading : t.videoGenerate}
+            </button>
+
+            {vGenerating && (
+              <div style={st.loadingWrap}>
+                <div style={{ fontSize: 40, animation: 'artPulse 1.5s ease-in-out infinite' }}>{'\u{1F3AC}'}</div>
+                <div style={st.loadingText}>{t.videoLoading}</div>
+                <div style={st.elapsedTimer}>{'\u23F1\uFE0F'} {formatTime(vElapsed)}</div>
+                <div style={st.elapsedHint}>
+                  {vElapsed < 15 ? 'Prompt wird verbessert...' :
+                   vElapsed < 30 ? 'Video wird generiert...' :
+                   vElapsed < 60 ? 'Noch einen Moment...' :
+                   'Fast fertig... Bitte warten'}
+                </div>
+              </div>
+            )}
+
+            {vError && !vGenerating && (
+              <div style={st.errorBox}>
+                {vError === 'unsafe' ? t.unsafe : vError}
+              </div>
+            )}
+
+            {/* Shared video gallery */}
+            {sharedVideos.length > 0 && (
+              <div style={st.gallerySection}>
+                <h3 style={st.galTitle}>Videos ({sharedVideos.length})</h3>
+                <div style={st.galGrid}>
+                  {sharedVideos.map(v => (
+                    <div key={v.id} style={st.galCard}>
+                      <video src={v.videoUrl} style={st.galImg} controls muted playsInline />
+                      <div style={st.galMeta}>
+                        <span style={st.galAuthor}>{v.author}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === 'video' && !videoEnabled && (
+          <div style={st.pausedBox}>{'\u{1F3AC}'} {t.videoDisabled}</div>
+        )}
+
       </div>
 
       {/* Preview overlay */}
@@ -898,5 +1160,40 @@ const st = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  tabRow: {
+    display: 'flex',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  tabBtn: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 15,
+    fontWeight: 700,
+    padding: '8px 20px',
+    borderRadius: 14,
+    border: '2px solid rgba(255,255,255,0.1)',
+    background: 'rgba(255,255,255,0.05)',
+    color: 'rgba(255,255,255,0.5)',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  tabActive: {
+    background: 'rgba(167,139,250,0.2)',
+    border: '2px solid rgba(167,139,250,0.5)',
+    color: '#A78BFA',
+  },
+  elapsedTimer: {
+    fontFamily: "'Baloo 2', cursive",
+    fontSize: 28,
+    fontWeight: 700,
+    color: '#4ECDC4',
+    textShadow: '0 0 20px rgba(78,205,196,0.3)',
+  },
+  elapsedHint: {
+    fontFamily: "'Fredoka', sans-serif",
+    fontSize: 13,
+    fontWeight: 500,
+    color: 'rgba(255,255,255,0.4)',
   },
 };
