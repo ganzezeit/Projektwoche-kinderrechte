@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { LANDESKUNDE_SLIDES } from '../data/landeskunde';
 import { playClickSound, playSuccessSound } from '../utils/audio';
+import Flag from './Flag';
 
 export default function LandeskundeViewer({ mode, dayColor, onComplete }) {
   const [idx, setIdx] = useState(0);
@@ -107,10 +108,10 @@ export default function LandeskundeViewer({ mode, dayColor, onComplete }) {
           {isAnimatedMap && slide.phase >= 2 && imgRect && (
             <>
               <div style={flagStyle(43, 18, '0s')}>
-                {'\u{1F1E9}\u{1F1EA}'}
+                <Flag code="de" size={36} />
               </div>
               <div style={flagStyle(51, 57, '0.3s')}>
-                {'\u{1F1F9}\u{1F1FF}'}
+                <Flag code="tz" size={36} />
               </div>
             </>
           )}

@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ref, onValue, set, remove, push } from 'firebase/database';
 import { db } from '../firebase';
 import { playClickSound } from '../utils/audio';
+import Flag from './Flag';
 
 const LANG_COLORS = {
   de: '#E3F2FD', en: '#E8F5E9', sw: '#FFF3E0', fr: '#F3E5F5', tr: '#FFEBEE',
 };
-const LANG_FLAGS = {
-  de: '\u{1F1E9}\u{1F1EA}', en: '\u{1F1EC}\u{1F1E7}', sw: '\u{1F1F9}\u{1F1FF}',
-  fr: '\u{1F1EB}\u{1F1F7}', tr: '\u{1F1F9}\u{1F1F7}',
+const LANG_COUNTRY_CODES = {
+  de: 'de', en: 'gb', sw: 'tz', fr: 'fr', tr: 'tr',
 };
 
 export default function VideoRoomManager({ roomCode, color }) {
@@ -173,7 +173,7 @@ export default function VideoRoomManager({ roomCode, color }) {
         userSelect: 'none', WebkitUserSelect: 'none',
       }}
     >
-      <span style={{ fontSize: 16 }}>{LANG_FLAGS[p.lang] || ''}</span>
+      {LANG_COUNTRY_CODES[p.lang] ? <Flag code={LANG_COUNTRY_CODES[p.lang]} size={16} /> : null}
       <span style={vs.cardName}>{p.name}</span>
     </div>
   );

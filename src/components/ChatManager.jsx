@@ -4,13 +4,14 @@ import { db } from '../firebase';
 import { QRCodeSVG } from 'qrcode.react';
 import { playClickSound } from '../utils/audio';
 import VideoRoomManager from './VideoRoomManager';
+import Flag from './Flag';
 
 const LANG_OPTIONS = [
-  { code: 'de', flag: '\u{1F1E9}\u{1F1EA}', label: 'Deutsch' },
-  { code: 'en', flag: '\u{1F1EC}\u{1F1E7}', label: 'English' },
-  { code: 'sw', flag: '\u{1F1F9}\u{1F1FF}', label: 'Kiswahili' },
-  { code: 'fr', flag: '\u{1F1EB}\u{1F1F7}', label: 'Français' },
-  { code: 'tr', flag: '\u{1F1F9}\u{1F1F7}', label: 'Türkçe' },
+  { code: 'de', countryCode: 'de', label: 'Deutsch' },
+  { code: 'en', countryCode: 'gb', label: 'English' },
+  { code: 'sw', countryCode: 'tz', label: 'Kiswahili' },
+  { code: 'fr', countryCode: 'fr', label: 'Français' },
+  { code: 'tr', countryCode: 'tr', label: 'Türkçe' },
 ];
 
 function generateCode() {
@@ -152,7 +153,7 @@ export default function ChatManager({ onClose, dayColor }) {
                         border: checked ? `2px solid ${color}` : '2px solid transparent',
                       }}
                     >
-                      <span style={{ fontSize: 20 }}>{lang.flag}</span>
+                      <Flag code={lang.countryCode} size={20} />
                       <span style={s.langLabel}>{lang.label}</span>
                     </button>
                   );
@@ -229,7 +230,7 @@ export default function ChatManager({ onClose, dayColor }) {
               {(activeRoom.languages || []).map(code => {
                 const lang = LANG_OPTIONS.find(l => l.code === code);
                 return lang ? (
-                  <span key={code} style={s.langTag}>{lang.flag} {lang.label}</span>
+                  <span key={code} style={s.langTag}><Flag code={lang.countryCode} size={16} /> {lang.label}</span>
                 ) : null;
               })}
             </div>

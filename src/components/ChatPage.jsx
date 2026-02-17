@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ref, onValue, push, get, set } from 'firebase/database';
 import { db } from '../firebase';
+import Flag from './Flag';
 
 const LANG_MAP = {
-  de: { flag: '\u{1F1E9}\u{1F1EA}', label: 'Deutsch' },
-  en: { flag: '\u{1F1EC}\u{1F1E7}', label: 'English' },
-  sw: { flag: '\u{1F1F9}\u{1F1FF}', label: 'Kiswahili' },
-  fr: { flag: '\u{1F1EB}\u{1F1F7}', label: 'Français' },
-  tr: { flag: '\u{1F1F9}\u{1F1F7}', label: 'Türkçe' },
+  de: { countryCode: 'de', label: 'Deutsch' },
+  en: { countryCode: 'gb', label: 'English' },
+  sw: { countryCode: 'tz', label: 'Kiswahili' },
+  fr: { countryCode: 'fr', label: 'Français' },
+  tr: { countryCode: 'tr', label: 'Türkçe' },
 };
 
 const LANG_COLORS = {
@@ -451,7 +452,7 @@ export default function ChatPage({ roomCode }) {
                     border: active ? '2px solid #FF6B35' : '2px solid transparent',
                   }}
                 >
-                  <span style={{ fontSize: 24 }}>{lang.flag}</span>
+                  <Flag code={lang.countryCode} size={24} />
                   <span style={s.joinLangLabel}>{lang.label}</span>
                 </button>
               );
@@ -476,13 +477,13 @@ export default function ChatPage({ roomCode }) {
   // Waiting room — shown after join until assigned to a video room
   if (!videoRoom) {
     const waitingOthers = Math.max(0, participantCount - assignedCount - 1);
-    const flag = LANG_MAP[userLang]?.flag || '';
+    const flagCode = LANG_MAP[userLang]?.countryCode || 'de';
     return (
       <div style={s.page}>
         <div style={s.waitCard}>
           <h1 style={s.waitRoomName}>{room?.name}</h1>
           <div style={s.waitUserInfo}>
-            <span style={{ fontSize: 28 }}>{flag}</span>
+            <Flag code={flagCode} size={28} />
             <span style={s.waitUserName}>{userName}</span>
           </div>
           <div style={s.waitIcon}>{'\u{1F4AC}'}</div>
@@ -582,7 +583,7 @@ export default function ChatPage({ roomCode }) {
               }}>
                 <div style={s.msgMeta}>
                   <span style={s.msgAuthor}>{msg.author}</span>
-                  <span style={s.msgFlag}>{lang?.flag || ''}</span>
+                  <span style={s.msgFlag}>{lang?.countryCode ? <Flag code={lang.countryCode} size={14} /> : ''}</span>
                   <span style={s.msgTime}>{time}</span>
                 </div>
                 <div style={s.msgText}>{displayText}</div>

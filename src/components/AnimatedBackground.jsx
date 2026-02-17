@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 
 export default function AnimatedBackground({ basePath, fallbackGradient }) {
   const [src, setSrc] = useState(null);
+  const [posterSrc, setPosterSrc] = useState(null);
   const [type, setType] = useState(null);
   const videoRef = useRef(null);
 
@@ -16,6 +17,7 @@ export default function AnimatedBackground({ basePath, fallbackGradient }) {
         if (!cancelled && res.ok) {
           setType('video');
           setSrc(`${basePath}.mp4`);
+          setPosterSrc(`${basePath}-poster.jpg`);
         } else {
           throw new Error('not found');
         }
@@ -44,7 +46,17 @@ export default function AnimatedBackground({ basePath, fallbackGradient }) {
   };
 
   if (type === 'video') return (
-    <video ref={videoRef} autoPlay loop muted playsInline style={baseStyle} key={src}>
+    <video
+      ref={videoRef}
+      autoPlay
+      loop
+      muted
+      playsInline
+      preload="auto"
+      poster={posterSrc || undefined}
+      style={baseStyle}
+      key={src}
+    >
       <source src={src} type="video/mp4" />
     </video>
   );
