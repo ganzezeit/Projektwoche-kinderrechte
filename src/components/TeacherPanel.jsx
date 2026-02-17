@@ -24,9 +24,6 @@ export default function TeacherPanel({
   onResetIntro,
   onResetAll,
   className: klassenName,
-  onSwitchClass,
-  onNewClass,
-  onResetClass,
   onForceSave,
   lastSaveTimestamp,
   onOpenWeeklyReport,
@@ -184,36 +181,6 @@ export default function TeacherPanel({
                 {localSaveStatus === 'saved' && '\u2705 Gespeichert!'}
                 {localSaveStatus === 'error' && '\u274C Fehler beim Speichern'}
               </button>
-            </div>
-          </>
-        )}
-
-        {/* Class section */}
-        {klassenName && (
-          <>
-            <div style={styles.sectionHeader}>Klasse</div>
-            <div style={styles.stateBox}>
-              <div style={styles.stateRow}>
-                <span style={styles.stateLabel}>Aktive Klasse:</span>
-                <span style={styles.stateValue}>{klassenName}</span>
-              </div>
-            </div>
-            <div style={styles.actions}>
-              {onSwitchClass && (
-                <button style={styles.actionButton} onClick={() => handleButton(onSwitchClass)}>
-                  {'\u{1F504}'} Klasse wechseln
-                </button>
-              )}
-              {onNewClass && (
-                <button style={styles.actionButton} onClick={() => handleButton(onNewClass)}>
-                  {'\u2795'} Neue Klasse
-                </button>
-              )}
-              {onResetClass && (
-                <button style={{ ...styles.actionButton, ...styles.dangerButtonIdle }} onClick={() => handleButton(onResetClass)}>
-                  {'\u26A0\uFE0F'} Klasse zurücksetzen
-                </button>
-              )}
             </div>
           </>
         )}

@@ -2,14 +2,18 @@ import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import './styles/global.css';
 import './styles/animations.css';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ProjectProvider, useProject } from './contexts/ProjectContext';
 
-// Code-split: BoardPage only loads on /board/:code route
+// Code-split: pages only load on their route
 const App = lazy(() => import('./components/App'));
 const BoardPage = lazy(() => import('./components/BoardPage'));
 const ChatPage = lazy(() => import('./components/ChatPage'));
 const QuizPage = lazy(() => import('./components/QuizPage'));
 const EinzelquizPage = lazy(() => import('./components/EinzelquizPage'));
 const ArtRoomPage = lazy(() => import('./components/ArtRoomPage'));
+const LoginScreen = lazy(() => import('./components/LoginScreen'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 
 // Print fix: overlays inside #root get hidden when #root content is hidden.
 // Solution: clone the printable overlay to document.body, hide #root, print.
@@ -56,7 +60,39 @@ function LoadingFallback() {
   );
 }
 
-// Simple path-based routing: /board/:code → BoardPage, everything else → App
+// Teacher app: auth gate → project gate → game
+function TeacherApp() {
+  const { user, loading: authLoading } = useAuth();
+  const { project, loading: projectLoading } = useProject();
+
+  if (authLoading) return <LoadingFallback />;
+
+  if (!user) {
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <LoginScreen />
+      </Suspense>
+    );
+  }
+
+  if (projectLoading) return <LoadingFallback />;
+
+  if (!project) {
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <AdminDashboard />
+      </Suspense>
+    );
+  }
+
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <App />
+    </Suspense>
+  );
+}
+
+// Simple path-based routing: student routes = NO auth, teacher route = auth
 function Root() {
   const path = window.location.pathname;
   const boardMatch = path.match(/^\/board\/([A-Za-z0-9]+)/);
@@ -99,10 +135,14 @@ function Root() {
       </Suspense>
     );
   }
+
+  // Teacher route: wrapped in auth + project providers
   return (
-    <Suspense fallback={<LoadingFallback />}>
-      <App />
-    </Suspense>
+    <AuthProvider>
+      <ProjectProvider>
+        <TeacherApp />
+      </ProjectProvider>
+    </AuthProvider>
   );
 }
 

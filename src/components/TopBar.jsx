@@ -142,7 +142,7 @@ function SaveIndicator({ status }) {
   );
 }
 
-export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId, dayColor, onOpenTeacherPanel, onTitleClick, isIntro, onOpenBoard, onOpenQuiz, onOpenChat, onOpenArtStudio, onOpenArtRoom, onLightningClick, className: klassenName, saveStatus }) {
+export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId, dayColor, onOpenTeacherPanel, onTitleClick, isIntro, onOpenBoard, onOpenQuiz, onOpenChat, onOpenArtStudio, onOpenArtRoom, onLightningClick, className: klassenName, saveStatus, projectName, onDashboard }) {
   const clickCountRef = useRef(0);
   const clickTimerRef = useRef(null);
   const [muted, setMuted] = useState(false);
@@ -238,8 +238,13 @@ export default function TopBar({ energy, volume, onVolumeChange, dayName, dayId,
 
       {/* Right: Class name + Board + Energy + Skip + Sound + Volume */}
       <div style={styles.right}>
-        {klassenName && (
-          <span style={styles.className}>Klasse {klassenName}</span>
+        {onDashboard && (
+          <button onClick={onDashboard} title="Zum Dashboard" style={styles.dashboardButton}>
+            {'\u{1F3E0}'}
+          </button>
+        )}
+        {projectName && (
+          <span style={styles.className}>{projectName}{klassenName ? ` (${klassenName})` : ''}</span>
         )}
         {onOpenBoard && (
           <PngButton
@@ -412,6 +417,16 @@ const styles = {
     padding: '3px 10px',
     borderRadius: 10,
     border: '1.5px solid rgba(255, 107, 53, 0.25)',
+  },
+  dashboardButton: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 22,
+    padding: '2px 4px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   artDropdown: {
     position: 'absolute',
