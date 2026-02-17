@@ -11,6 +11,28 @@ const QuizPage = lazy(() => import('./components/QuizPage'));
 const EinzelquizPage = lazy(() => import('./components/EinzelquizPage'));
 const ArtRoomPage = lazy(() => import('./components/ArtRoomPage'));
 
+// Print fix: overlays inside #root get hidden when #root content is hidden.
+// Solution: clone the printable overlay to document.body, hide #root, print.
+let printClone = null;
+window.addEventListener('beforeprint', () => {
+  const overlay = document.querySelector(
+    '.board-overlay, .quiz-dialog-overlay, .quiz-analysis-overlay, .weekly-report-overlay'
+  );
+  if (!overlay) return;
+  const root = document.getElementById('root');
+  // Only clone if overlay is inside #root (portaled overlays are already outside)
+  if (root && root.contains(overlay)) {
+    printClone = overlay.cloneNode(true);
+    printClone.classList.add('print-clone');
+    document.body.appendChild(printClone);
+  }
+  document.documentElement.classList.add('printing-overlay');
+});
+window.addEventListener('afterprint', () => {
+  document.documentElement.classList.remove('printing-overlay');
+  if (printClone) { printClone.remove(); printClone = null; }
+});
+
 // Minimal loading spinner for Suspense
 function LoadingFallback() {
   return (

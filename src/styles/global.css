@@ -60,22 +60,25 @@ button:focus-visible {
   -webkit-user-select: none;
 }
 
-/* ====== General print cleanup: only hide background when a printable overlay is open ====== */
+/* ====== Print overlay system ====== */
+/* JS in main.jsx clones overlay to body + adds html.printing-overlay before print */
+/* Clone is hidden on screen, visible only during print */
+.print-clone {
+  display: none !important;
+}
 @media print {
-  /* When any printable overlay exists inside the app, hide background content */
-  .no-select:has(.board-overlay) > .app-screen-content,
-  .no-select:has(.board-overlay) > .app-top-bar,
-  .no-select:has(.board-overlay) > .app-bottom-bar,
-  .no-select:has(.quiz-dialog-overlay) > .app-screen-content,
-  .no-select:has(.quiz-dialog-overlay) > .app-top-bar,
-  .no-select:has(.quiz-dialog-overlay) > .app-bottom-bar,
-  .no-select:has(.quiz-analysis-overlay) > .app-screen-content,
-  .no-select:has(.quiz-analysis-overlay) > .app-top-bar,
-  .no-select:has(.quiz-analysis-overlay) > .app-bottom-bar,
-  .no-select:has(.weekly-report-overlay) > .app-screen-content,
-  .no-select:has(.weekly-report-overlay) > .app-top-bar,
-  .no-select:has(.weekly-report-overlay) > .app-bottom-bar {
+  html.printing-overlay #root {
     display: none !important;
+  }
+  .print-clone {
+    display: block !important;
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    background: white !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }
 
@@ -93,11 +96,6 @@ button:focus-visible {
     width: auto !important;
     position: static !important;
     background: white !important;
-  }
-
-  /* Hide app content behind portaled board overlay */
-  #root:has(~ .board-overlay) {
-    display: none !important;
   }
 
   /* Convert the fixed overlay to a normal static block */
@@ -217,9 +215,6 @@ button:focus-visible {
 
 /* ====== Print stylesheet for Quiz Dialog (Einzelquiz Results/Comparison) ====== */
 @media print {
-  /* Hide everything in #root except the overlay being printed */
-  #root:has(.quiz-dialog-overlay) > *:not(.quiz-dialog-overlay) { display: none !important; }
-
   .quiz-dialog-overlay {
     position: static !important;
     overflow: visible !important;
@@ -243,9 +238,6 @@ button:focus-visible {
 
 /* ====== Print stylesheet for Weekly Report ====== */
 @media print {
-  /* Hide everything in #root except the overlay being printed */
-  #root:has(.weekly-report-overlay) > *:not(.weekly-report-overlay) { display: none !important; }
-
   .weekly-report-overlay {
     position: static !important;
     overflow: visible !important;
