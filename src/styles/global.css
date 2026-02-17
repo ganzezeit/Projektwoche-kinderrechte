@@ -60,12 +60,21 @@ button:focus-visible {
   -webkit-user-select: none;
 }
 
-/* ====== General print cleanup ====== */
+/* ====== General print cleanup: only hide background when a printable overlay is open ====== */
 @media print {
-  /* Hide background screens (map, steps, energizers, top bar, bottom bar) during ANY print */
-  .app-screen-content,
-  .app-top-bar,
-  .app-bottom-bar {
+  /* When any printable overlay exists inside the app, hide background content */
+  .no-select:has(.board-overlay) > .app-screen-content,
+  .no-select:has(.board-overlay) > .app-top-bar,
+  .no-select:has(.board-overlay) > .app-bottom-bar,
+  .no-select:has(.quiz-dialog-overlay) > .app-screen-content,
+  .no-select:has(.quiz-dialog-overlay) > .app-top-bar,
+  .no-select:has(.quiz-dialog-overlay) > .app-bottom-bar,
+  .no-select:has(.quiz-analysis-overlay) > .app-screen-content,
+  .no-select:has(.quiz-analysis-overlay) > .app-top-bar,
+  .no-select:has(.quiz-analysis-overlay) > .app-bottom-bar,
+  .no-select:has(.weekly-report-overlay) > .app-screen-content,
+  .no-select:has(.weekly-report-overlay) > .app-top-bar,
+  .no-select:has(.weekly-report-overlay) > .app-bottom-bar {
     display: none !important;
   }
 }
